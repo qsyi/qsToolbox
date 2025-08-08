@@ -37,6 +37,6 @@ UnityEditor 拡張ツールです。
 - 素体のスケールをまとめて変更可能  
 - ![Scale画像](https://github.com/user-attachments/assets/70be103c-ebd8-4a8d-8ba1-8a3976291b23)
 
-### 参考
+### 参考にさせていただいたアイデア
 
 - [Copy Scale Adjuster](https://github.com/Rerigferl/modular-avatar-copy-scale-adjuster)

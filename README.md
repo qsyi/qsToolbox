@@ -4,7 +4,7 @@ UnityEditor拡張ツール
 
 ## インストール手順
 
-1. [Add to VCC](vcc://vpm/addRepo?url=https://qsyi.github.io/vpm-repos/index.json) から追加
+1. [Add to VCC](https://qsyi.github.io/vpm-repos/) から追加
 
 ## 動作環境
 

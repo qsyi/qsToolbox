@@ -7,29 +7,27 @@ namespace qsyi
     internal class ToggleEditorOnly
     {
         private const string EditorOnlyTag = "EditorOnly";
-        private const string Untagged = "Untagged";
+        private const string UntaggedTag = "Untagged";
 
-        [MenuItem("Tools/qs/Toggle EditorOnly %e")] // Ctrl+E
+        [MenuItem("Tools/qs/Toggle EditorOnly %e")]
         private static void ToggleSelectedObjects()
         {
-            GameObject[] selectedObjects = Selection.gameObjects;
-
-            if (selectedObjects.Length == 0)
-                return;
+            GameObject[] selected = Selection.gameObjects;
+            if (selected.Length == 0) return;
 
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();
 
-            foreach (GameObject obj in selectedObjects)
+            foreach (GameObject obj in selected)
             {
                 Undo.RecordObject(obj, "Toggle EditorOnly");
 
-                bool isCurrentlyHidden = !obj.activeSelf;
-                bool isCurrentlyEditorOnly = obj.tag == EditorOnlyTag;
+                bool isHidden = !obj.activeSelf;
+                bool isEditorOnly = obj.tag == EditorOnlyTag;
 
-                if (isCurrentlyHidden && isCurrentlyEditorOnly)
+                if (isHidden && isEditorOnly)
                 {
-                    obj.tag = Untagged;
+                    obj.tag = UntaggedTag;
                     obj.SetActive(true);
                 }
                 else

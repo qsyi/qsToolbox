@@ -171,22 +171,43 @@ namespace qsyi
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_UseShadow", "影使用"), new PropertyItem("_ShadowBorder", "影境界"),
-                    new PropertyItem("_ShadowBlur", "影ぼかし"), new PropertyItem("_ShadowStrength", "影強度"),
-                    new PropertyItem("_Shadow2ndBorder", "2nd影境界"), new PropertyItem("_Shadow2ndBlur", "2nd影ぼかし"),
-                    new PropertyItem("_Shadow3rdBorder", "3rd影境界"), new PropertyItem("_Shadow3rdBlur", "3rd影ぼかし"),
-                    new PropertyItem("_ShadowMainStrength", "影強度（メイン）"), new PropertyItem("_ShadowEnvStrength", "影強度（環境）"),
-                    new PropertyItem("_ShadowBorderBlur", "影境界ぼかし"), new PropertyItem("_Shadow2ndMainStrength", "2nd影強度（メイン）"),
-                    new PropertyItem("_Shadow2ndEnvStrength", "2nd影強度（環境）"), new PropertyItem("_Shadow3rdMainStrength", "3rd影強度（メイン）"),
-                    new PropertyItem("_Shadow3rdEnvStrength", "3rd影強度（環境）")
+                    new PropertyItem("_UseShadow", "影使用"), 
+                    new PropertyItem("_ShadowStrength", "影強度"),
+                    new PropertyItem("_ShadowBorder", "影境界"),
+                    new PropertyItem("_ShadowBlur", "影ぼかし"), 
+                    new PropertyItem("_ShadowNormalStrength", "法線強度"),
+                    new PropertyItem("_ShadowReceive", "影受け取り"),
+                    new PropertyItem("_Shadow2ndBorder", "2nd影境界"), 
+                    new PropertyItem("_Shadow2ndBlur", "2nd影ぼかし"),
+                    new PropertyItem("_Shadow2ndNormalStrength", "2nd法線強度"),
+                    new PropertyItem("_Shadow2ndReceive", "2nd影受け取り"),
+                    new PropertyItem("_Shadow3rdBorder", "3rd影境界"), 
+                    new PropertyItem("_Shadow3rdBlur", "3rd影ぼかし"),
+                    new PropertyItem("_Shadow3rdNormalStrength", "3rd法線強度"),
+                    new PropertyItem("_Shadow3rdReceive", "3rd影受け取り"),
+                    new PropertyItem("_ShadowMainStrength", "影強度（メイン）"), 
+                    new PropertyItem("_ShadowEnvStrength", "影強度（環境）"),
+                    new PropertyItem("_ShadowBorderBlur", "影境界ぼかし"), 
+                    new PropertyItem("_Shadow2ndMainStrength", "2nd影強度（メイン）"),
+                    new PropertyItem("_Shadow2ndEnvStrength", "2nd影強度（環境）"), 
+                    new PropertyItem("_Shadow3rdMainStrength", "3rd影強度（メイン）"),
+                    new PropertyItem("_Shadow3rdEnvStrength", "3rd影強度（環境）"),
+                    new PropertyItem("_ShadowBorderRange", "影境界範囲"),
+                    new PropertyItem("_ShadowColorType", "影色タイプ"),
+                    new PropertyItem("_ShadowPostAO", "AO後適用"),
+                    new PropertyItem("_ShadowMaskType", "マスクタイプ"),
+                    new PropertyItem("_ShadowFlatBorder", "フラット境界"),
+                    new PropertyItem("_ShadowFlatBlur", "フラットぼかし")
                 }
             },
             new PropertyGroup("ShadowColors", "影色", true, "Shadow")
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_ShadowColor", "影色"), new PropertyItem("_Shadow2ndColor", "2nd影色"),
-                    new PropertyItem("_Shadow3rdColor", "3rd影色")
+                    new PropertyItem("_ShadowColor", "影色"), 
+                    new PropertyItem("_Shadow2ndColor", "2nd影色"),
+                    new PropertyItem("_Shadow3rdColor", "3rd影色"),
+                    new PropertyItem("_ShadowBorderColor", "影境界色")
                 }
             },
             
@@ -195,10 +216,11 @@ namespace qsyi
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_UseRimShade", "RimShade使用"), new PropertyItem("_RimShadeBorder", "RimShade境界"),
-                    new PropertyItem("_RimShadeBlur", "RimShadeぼかし"), new PropertyItem("_RimShadeFresnelPower", "RimShadeフレネル"),
-                    new PropertyItem("_RimShadeMin", "RimShade最小値"), new PropertyItem("_RimShadeMax", "RimShade最大値"),
-                    new PropertyItem("_RimShadeMix", "RimShade混合"), new PropertyItem("_RimShadeNormalStrength", "RimShadeノーマル強度")
+                    new PropertyItem("_UseRimShade", "RimShade使用"), 
+                    new PropertyItem("_RimShadeBorder", "RimShade境界"),
+                    new PropertyItem("_RimShadeBlur", "RimShadeぼかし"), 
+                    new PropertyItem("_RimShadeFresnelPower", "RimShadeフレネル"),
+                    new PropertyItem("_RimShadeNormalStrength", "RimShadeノーマル強度")
                 }
             },
             new PropertyGroup("RimShadeColors", "RimShade色", true, "RimShade")
@@ -211,10 +233,16 @@ namespace qsyi
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_UseBacklight", "逆光ライト使用"), new PropertyItem("_BacklightPower", "逆光ライト強度"),
-                    new PropertyItem("_BacklightBorder", "逆光ライト境界"), new PropertyItem("_BacklightBlur", "逆光ライトぼかし"),
-                    new PropertyItem("_BacklightDirectivity", "逆光ライト指向性"), new PropertyItem("_BacklightViewStrength", "逆光ライトビュー強度"),
-                    new PropertyItem("_BacklightNormalStrength", "逆光ライトノーマル強度")
+                    new PropertyItem("_UseBacklight", "逆光ライト使用"), 
+                    new PropertyItem("_BacklightPower", "逆光ライト強度"),
+                    new PropertyItem("_BacklightMainStrength", "メイン色強度"),
+                    new PropertyItem("_BacklightBorder", "逆光ライト境界"), 
+                    new PropertyItem("_BacklightBlur", "逆光ライトぼかし"),
+                    new PropertyItem("_BacklightDirectivity", "逆光ライト指向性"), 
+                    new PropertyItem("_BacklightViewStrength", "逆光ライトビュー強度"),
+                    new PropertyItem("_BacklightNormalStrength", "逆光ライトノーマル強度"),
+                    new PropertyItem("_BacklightReceiveShadow", "影受け取り"),
+                    new PropertyItem("_BacklightBackfaceMask", "裏面マスク")
                 }
             },
             new PropertyGroup("BackLightColors", "逆光ライト色", true, "BackLight")
@@ -227,19 +255,32 @@ namespace qsyi
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_UseRim", "リムライト使用"), new PropertyItem("_RimBorder", "リム境界"),
-                    new PropertyItem("_RimBlur", "リムぼかし"), new PropertyItem("_RimFresnelPower", "リムフレネル"),
-                    new PropertyItem("_RimPower", "リム強度"), new PropertyItem("_RimEnableLighting", "リムライティング"),
-                    new PropertyItem("_RimShadowMask", "リム影マスク"), new PropertyItem("_RimBackfaceMask", "リム裏面マスク"),
-                    new PropertyItem("_RimNormalStrength", "リムノーマル強度"), new PropertyItem("_RimApplyTransparency", "リム透明度適用"),
-                    new PropertyItem("_RimDirStrength", "リム方向強度"), new PropertyItem("_RimDirRange", "リム方向範囲"),
-                    new PropertyItem("_RimIndirRange", "リム間接範囲"), new PropertyItem("_RimIndirColor", "リム間接色"),
-                    new PropertyItem("_RimIndirBorder", "リム間接境界"), new PropertyItem("_RimIndirBlur", "リム間接ぼかし")
+                    new PropertyItem("_UseRim", "リムライト使用"), 
+                    new PropertyItem("_RimBorder", "リム境界"),
+                    new PropertyItem("_RimBlur", "リムぼかし"), 
+                    new PropertyItem("_RimFresnelPower", "リムフレネル"),
+                    new PropertyItem("_RimPower", "リム強度"), 
+                    new PropertyItem("_RimMainStrength", "メイン色強度"),
+                    new PropertyItem("_RimNormalStrength", "リムノーマル強度"),
+                    new PropertyItem("_RimEnableLighting", "リムライティング"),
+                    new PropertyItem("_RimShadowMask", "リム影マスク"), 
+                    new PropertyItem("_RimBackfaceMask", "リム裏面マスク"),
+                    new PropertyItem("_RimApplyTransparency", "リム透明度適用"),
+                    new PropertyItem("_RimVRParallaxStrength", "VR視差強度"),
+                    new PropertyItem("_RimDirStrength", "リム方向強度"), 
+                    new PropertyItem("_RimDirRange", "リム方向範囲"),
+                    new PropertyItem("_RimIndirRange", "リム間接範囲"), 
+                    new PropertyItem("_RimIndirBorder", "リム間接境界"), 
+                    new PropertyItem("_RimIndirBlur", "リム間接ぼかし")
                 }
             },
             new PropertyGroup("RimColors", "リムライト色", true, "Rim")
             {
-                Properties = new List<PropertyItem> { new PropertyItem("_RimColor", "リムライト色") }
+                Properties = new List<PropertyItem> 
+                { 
+                    new PropertyItem("_RimColor", "リムライト色"),
+                    new PropertyItem("_RimIndirColor", "リム間接色")
+                }
             },
             
             new PropertyGroup("Outline", "輪郭線設定"),
@@ -247,19 +288,29 @@ namespace qsyi
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_OutlineWidth", "アウトライン幅"), new PropertyItem("_OutlineScaledMaxDistance", "スケール最大距離"),
-                    new PropertyItem("_OutlineVertexR2Width", "頂点R2幅"), new PropertyItem("_OutlineFixWidth", "固定幅"),
-                    new PropertyItem("_OutlineEnableLighting", "アウトラインライティング"), new PropertyItem("_OutlineCull", "アウトラインカリング"),
-                    new PropertyItem("_OutlineZBias", "アウトラインZバイアス"), new PropertyItem("_OutlineDissolveOutputMode", "アウトラインディゾルブ出力"),
-                    new PropertyItem("_OutlineStencilRef", "アウトラインステンシル"), new PropertyItem("_OutlineStencilReadMask", "アウトラインステンシル読み取り"),
-                    new PropertyItem("_OutlineStencilWriteMask", "アウトラインステンシル書き込み"), new PropertyItem("_OutlineStencilComp", "アウトラインステンシル比較"),
-                    new PropertyItem("_OutlineStencilPass", "アウトラインステンシルパス"), new PropertyItem("_OutlineStencilFail", "アウトラインステンシル失敗"),
-                    new PropertyItem("_OutlineStencilZFail", "アウトラインステンシルZ失敗")
+                    new PropertyItem("_OutlineWidth", "アウトライン幅"), 
+                    new PropertyItem("_OutlineFixWidth", "固定幅"),
+                    new PropertyItem("_OutlineVertexR2Width", "頂点R2幅"), 
+                    new PropertyItem("_OutlineEnableLighting", "アウトラインライティング"), 
+                    new PropertyItem("_OutlineZBias", "アウトラインZバイアス"), 
+                    new PropertyItem("_OutlineLitScale", "Litスケール"),
+                    new PropertyItem("_OutlineLitOffset", "Litオフセット"),
+                    new PropertyItem("_OutlineLitApplyTex", "Litテクスチャ適用"),
+                    new PropertyItem("_OutlineLitShadowReceive", "Lit影受け取り"),
+                    new PropertyItem("_OutlineDeleteMesh", "メッシュ削除"),
+                    new PropertyItem("_OutlineVectorScale", "ベクタースケール"),
+                    new PropertyItem("_OutlineVectorUVMode", "ベクターUVモード"),
+                    new PropertyItem("_OutlineDisableInVR", "VRで無効化"),
+                    new PropertyItem("_OutlineTexHSVG", "テクスチャHSVG設定")
                 }
             },
             new PropertyGroup("OutlineColors", "輪郭線色", true, "Outline")
             {
-                Properties = new List<PropertyItem> { new PropertyItem("_OutlineColor", "アウトライン色") }
+                Properties = new List<PropertyItem> 
+                { 
+                    new PropertyItem("_OutlineColor", "アウトライン色"),
+                    new PropertyItem("_OutlineLitColor", "アウトラインLit色")
+                }
             },
             
             new PropertyGroup("DistanceFade", "距離フェード"),
@@ -267,16 +318,17 @@ namespace qsyi
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_DistanceFadeStart", "フェード開始距離"), new PropertyItem("_DistanceFadeEnd", "フェード終了距離"),
-                    new PropertyItem("_DistanceFadePower", "フェード強度"), new PropertyItem("_DistanceFadeMode", "フェードモード"),
-                    new PropertyItem("_DistanceFadeRimWidth", "フェードリム幅"), new PropertyItem("_DistanceFadeRimFresnelPower", "フェードリムフレネル")
+                    new PropertyItem("_DistanceFade", "フェード設定（開始・終了距離含む）"), 
+                    new PropertyItem("_DistanceFadeMode", "フェードモード"),
+                    new PropertyItem("_DistanceFadeRimFresnelPower", "フェードリムフレネル")
                 }
             },
             new PropertyGroup("DistanceFadeColors", "距離フェード色", true, "DistanceFade")
             {
                 Properties = new List<PropertyItem>
                 {
-                    new PropertyItem("_DistanceFadeColor", "フェード色"), new PropertyItem("_DistanceFadeRimColor", "フェードリム色")
+                    new PropertyItem("_DistanceFadeColor", "フェード色"), 
+                    new PropertyItem("_DistanceFadeRimColor", "フェードリム色")
                 }
             }
         };

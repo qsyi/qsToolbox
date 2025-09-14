@@ -28,19 +28,20 @@ Unity Editor 拡張、C#、Modular Avatar 1.10.0以上
 
 ## インストール方法 <a name="インストール方法"></a>
 
-- 推奨：VPM リポジトリから追加  
-  [https://qsyi.github.io/vpm-repos/](https://qsyi.github.io/vpm-repos/) の **Add VCC** ボタンを使用
+- 推奨：VPM リポジトリの[**Add to VCC**](https://qsyi.github.io/vpm-repos/) 
 
-- 代替：最新の `.unitypackage` を手動でインポート
-
+- 代替：[最新](https://github.com/qsyi/qsToolbox/releases/latest)の `.unitypackage` をインポート  
 
 ## 主な機能一覧 <a name="主な機能一覧"></a>
 
-- **ToggleEditorOnly**
-  - `Ctrl + E`で選択オブジェクトを`EditorOnly`かつ非アクティブに
+- **ToggleEditorOnly**  
+  `Ctrl + E`で選択オブジェクトを`EditorOnly`かつ非アクティブに  
+  ![ToggleEditorOnly](https://github.com/user-attachments/assets/60e88bac-3241-4d64-a553-844115eca533)
+
 - **BookmarkOverlay** - 作業中のフォルダ移動を短縮し、効率的にアクセス可能  
   - 「Assetsフォルダのトップ」に戻る  
   - 特定フォルダへジャンプ
+
 - **qsToolBox** - 必要なツールをワンウィンドウでまとめて管理  
   - `Ctrl + Q`でウィンドウを開く  
   - 配下のマテリアルやシェイプキーを自動探索

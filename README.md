@@ -23,7 +23,7 @@
 
 - **スケール調整**
   - アバターと衣装のボーンを一括スケーリング
-  - MAScale Adjuster対応
+  - 素体のMA Scale Adjusterに合わせ衣装を自動調整
 
 ## インストール方法 <a name="インストール方法"></a>
 - 推奨: VPMリポジトリの [**Add to VCC**](https://qsyi.github.io/vpm-repos/) を利用  
@@ -45,18 +45,16 @@
   - 配下のマテリアルやシェイプキーを自動探索  
 
   - **マテリアルモード**  
-    - マテリアル差し替え  
-    - マテリアルコピー  
+    - マテリアル差し替え
+    - マテリアルコピー
 
   - **ブレンドシェイプモード**  
-    - シェイプキー検索  
-    - シェイプキー合成  
+    - シェイプキー検索
+    - シェイプキー合成
 
   - **スケールモード**  
-    - アバターと衣装ボーンをまとめて調整  
-    - 素体のMAScaleAdjusterに合わせ衣装を自動調整  
-    - 素体のスケールをまとめて変更可能  
+    - アバターと衣装ボーンをまとめて調整
 
 ## 動作環境 <a name="動作環境"></a>
 - Unity 2022.3.22f1 以降推奨  
-- [Modular Avatar](https://modular-avatar.nadena.dev/ja) が必要  
+- [Modular Avatar](https://modular-avatar.nadena.dev/ja) v1.10.0以降が必要  

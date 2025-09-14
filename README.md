@@ -38,7 +38,7 @@
   - ホーム: Assets直下に戻る  
   - ブックマーク: 登録済みフォルダへ移動  
   - 管理ウィンドウ: ブックマークの並べ替え・削除が可能  
-  - ![ToggleEditorOnly](https://github.com/user-attachments/assets/60e88bac-3241-4d64-a553-844115eca533)  
+  ![ToggleEditorOnly](https://github.com/user-attachments/assets/60e88bac-3241-4d64-a553-844115eca533)  
 
 - **qsToolBoxウィンドウ**  
   - `Ctrl + Q`で呼び出し  

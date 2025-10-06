@@ -1493,6 +1493,12 @@ namespace qsyi
             }
             else
             {
+                mesh.ClearBlendShapes();  // 追加
+                // 既存のブレンドシェイプを再追加
+                for (int i = 0; i < originalMesh.blendShapeCount; i++)
+                {
+                    CopyExistingBlendShape(originalMesh, mesh, i, originalMesh.GetBlendShapeName(i));
+                }
                 mesh.AddBlendShapeFrame(targetName, 100f, composedDeltas.vertices, composedDeltas.normals, composedDeltas.tangents);
                 return mesh;
             }
@@ -1609,8 +1615,22 @@ namespace qsyi
                 normals = mesh.normals,
                 tangents = mesh.tangents,
                 uv = mesh.uv,
+                uv2 = mesh.uv2,  // 追加
+                uv3 = mesh.uv3,  // 追加
+                uv4 = mesh.uv4,  // 追加
+                colors = mesh.colors,  // 追加
+                boneWeights = mesh.boneWeights,  // 追加
+                bindposes = mesh.bindposes,  // 追加
+                bounds = mesh.bounds,  // 追加：これが重要
                 name = mesh.name
             };
+            
+            // サブメッシュ情報もコピー（追加）
+            tempMesh.subMeshCount = mesh.subMeshCount;
+            for (int i = 0; i < mesh.subMeshCount; i++)
+            {
+                tempMesh.SetSubMesh(i, mesh.GetSubMesh(i));
+            }
             
             for (int i = 0; i < originalMesh.blendShapeCount; i++)
             {

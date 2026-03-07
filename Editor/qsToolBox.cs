@@ -20,6 +20,7 @@ namespace qsyi
         [SerializeField] private Transform _avatarArmature;
         [SerializeField] private List<OutfitArmatureEntry> _outfitArmatureEntries = new List<OutfitArmatureEntry>();
         [SerializeField] private bool _autoScaleSyncEnabled;
+        [SerializeField] private bool _autoSyncPositionAndRotation;
         
         private Mode _mode = Mode.Material;
         private Vector2 _scrollPosition;
@@ -52,8 +53,8 @@ namespace qsyi
         private bool _isDirty = true;
         private bool _isApplyingAutoSync;
         private double _nextAutoSyncTime;
-        private readonly Dictionary<string, (Vector3 localScale, bool hasAdjuster, Vector3 adjusterScale)> _avatarScaleCache
-            = new Dictionary<string, (Vector3, bool, Vector3)>();
+        private readonly Dictionary<string, (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale)> _avatarScaleCache
+            = new Dictionary<string, (Vector3, Vector3, Quaternion, bool, Vector3)>();
         private static FieldInfo _adjustChildPositionsField;
         private static bool _adjustChildPositionsResolved;
         
@@ -127,6 +128,9 @@ namespace qsyi
         
         private void OnDisable()
         {
+            if (_autoScaleSyncEnabled)
+                SetAutoScaleSyncEnabled(false);
+
             EditorApplication.hierarchyChanged -= OnHierarchyChanged;
             Undo.postprocessModifications -= OnUndo;
             EditorApplication.update -= OnEditorUpdate;
@@ -201,6 +205,9 @@ namespace qsyi
             EditorGUILayout.Space(4);
             DrawTabButtons(TAB_NAMES, TAB_TOOLTIPS, (int)_mode, (index) => 
             {
+                if (_autoScaleSyncEnabled && _mode != (Mode)index)
+                    SetAutoScaleSyncEnabled(false);
+
                 _mode = (Mode)index;
                 GUI.FocusControl(null);
                 ScanData();
@@ -982,6 +989,18 @@ namespace qsyi
                 if (!contextAvailable && _autoScaleSyncEnabled)
                     SetAutoScaleSyncEnabled(false);
 
+                bool previousSyncPositionAndRotation = _autoSyncPositionAndRotation;
+                _autoSyncPositionAndRotation = EditorGUILayout.ToggleLeft(
+                    "Position / Rotation も同期する",
+                    _autoSyncPositionAndRotation);
+
+                if (_autoScaleSyncEnabled && previousSyncPositionAndRotation != _autoSyncPositionAndRotation)
+                {
+                    _avatarScaleCache.Clear();
+                    _nextAutoSyncTime = 0d;
+                    ApplyAvatarScalesToOutfits();
+                }
+
                 bool previousEnabled = _autoScaleSyncEnabled;
                 GUI.enabled = canSync && contextAvailable;
                 string buttonLabel = _autoScaleSyncEnabled ? "同期終了" : "同期開始";
@@ -990,27 +1009,16 @@ namespace qsyi
 
                 if (newEnabled != previousEnabled)
                 {
-                    if (newEnabled)
-                    {
-                        bool confirmed = EditorUtility.DisplayDialog(
-                            "同期を開始",
-                            "同期中は素体のTransform/ScaleAdjuster変更を衣装へ常に反映します。開始しますか？",
-                            "開始",
-                            "キャンセル");
-                        SetAutoScaleSyncEnabled(confirmed);
-                    }
-                    else
-                    {
-                        SetAutoScaleSyncEnabled(false);
-                    }
+                    SetAutoScaleSyncEnabled(newEnabled);
                 }
+
+                if (canSync && contextAvailable)
+                    EditorGUILayout.HelpBox("同期中は常にスケール等の変更を反映します。", MessageType.Info);
 
                 if (!canSync)
                     EditorGUILayout.HelpBox("素体と衣装の両方にボーンが必要です。", MessageType.Info);
                 else if (!contextAvailable)
                     EditorGUILayout.HelpBox(contextMessage, MessageType.Info);
-                else if (_autoScaleSyncEnabled)
-                    EditorGUILayout.HelpBox("同期ON: 素体のTransform/ScaleAdjuster変更を衣装へ自動反映します。", MessageType.None);
             });
         }
         
@@ -1033,7 +1041,7 @@ namespace qsyi
             if (_isDirty || _avatarBones.Count == 0 || _outfitBones.Count == 0)
                 ScanBones();
 
-            if (!HasAvatarScaleChanges())
+            if (!HasAvatarSyncSourceChanges())
                 return;
 
             ApplyAvatarScalesToOutfits();
@@ -1070,7 +1078,7 @@ namespace qsyi
             return true;
         }
 
-        private bool HasAvatarScaleChanges()
+        private bool HasAvatarSyncSourceChanges()
         {
             bool changed = false;
             var seen = new HashSet<string>();
@@ -1084,9 +1092,15 @@ namespace qsyi
                 var adjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
                 bool hasAdjuster = adjuster != null;
                 Vector3 adjusterScale = hasAdjuster ? adjuster.Scale : Vector3.zero;
-                var snapshot = (avatarBone.localScale, hasAdjuster, adjusterScale);
+                var snapshot = (
+                    avatarBone.localScale,
+                    avatarBone.localPosition,
+                    avatarBone.localRotation,
+                    hasAdjuster,
+                    adjusterScale);
 
-                if (!_avatarScaleCache.TryGetValue(boneName, out var cached) || !AreScaleSnapshotsEqual(cached, snapshot))
+                if (!_avatarScaleCache.TryGetValue(boneName, out var cached) ||
+                    !AreSyncSnapshotsEqual(cached, snapshot, _autoSyncPositionAndRotation))
                 {
                     _avatarScaleCache[boneName] = snapshot;
                     changed = true;
@@ -1104,12 +1118,20 @@ namespace qsyi
             return changed;
         }
 
-        private static bool AreScaleSnapshotsEqual(
-            (Vector3 localScale, bool hasAdjuster, Vector3 adjusterScale) a,
-            (Vector3 localScale, bool hasAdjuster, Vector3 adjusterScale) b)
+        private static bool AreSyncSnapshotsEqual(
+            (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale) a,
+            (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale) b,
+            bool includePositionAndRotation)
         {
             if (!Approximately(a.localScale, b.localScale))
                 return false;
+            if (includePositionAndRotation)
+            {
+                if (!Approximately(a.localPosition, b.localPosition))
+                    return false;
+                if (!Approximately(a.localRotation, b.localRotation))
+                    return false;
+            }
             if (a.hasAdjuster != b.hasAdjuster)
                 return false;
             if (a.hasAdjuster && !Approximately(a.adjusterScale, b.adjusterScale))
@@ -1122,6 +1144,11 @@ namespace qsyi
             return Mathf.Approximately(a.x, b.x) &&
                    Mathf.Approximately(a.y, b.y) &&
                    Mathf.Approximately(a.z, b.z);
+        }
+
+        private static bool Approximately(Quaternion a, Quaternion b)
+        {
+            return Quaternion.Angle(a, b) < 0.01f;
         }
 
         private static bool IsAdjustChildPositionsEnabled()
@@ -1219,7 +1246,7 @@ namespace qsyi
             _isApplyingAutoSync = true;
             try
             {
-                Undo.SetCurrentGroupName("Auto Sync Scales");
+                Undo.SetCurrentGroupName("Auto Sync Bones");
                 int undoGroup = Undo.GetCurrentGroup();
                 bool hasAnyChange = false;
 
@@ -1230,6 +1257,8 @@ namespace qsyi
 
                     var avatarAdjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
                     Vector3 avatarLocalScale = avatarBone.localScale;
+                    Vector3 avatarLocalPosition = avatarBone.localPosition;
+                    Quaternion avatarLocalRotation = avatarBone.localRotation;
 
                     foreach (var outfit in _targets.Where(t => t != null))
                     {
@@ -1245,6 +1274,25 @@ namespace qsyi
                             outfitBone.localScale = avatarLocalScale;
                             EditorUtility.SetDirty(outfitBone);
                             hasAnyChange = true;
+                        }
+
+                        if (_autoSyncPositionAndRotation)
+                        {
+                            if (!Approximately(outfitBone.localPosition, avatarLocalPosition))
+                            {
+                                Undo.RecordObject(outfitBone, "Auto Sync Transform Position");
+                                outfitBone.localPosition = avatarLocalPosition;
+                                EditorUtility.SetDirty(outfitBone);
+                                hasAnyChange = true;
+                            }
+
+                            if (!Approximately(outfitBone.localRotation, avatarLocalRotation))
+                            {
+                                Undo.RecordObject(outfitBone, "Auto Sync Transform Rotation");
+                                outfitBone.localRotation = avatarLocalRotation;
+                                EditorUtility.SetDirty(outfitBone);
+                                hasAnyChange = true;
+                            }
                         }
 
                         if (avatarAdjuster == null)

@@ -126,7 +126,7 @@ namespace qsyi
         // Generation
         private static void GeneratePpsTexture(string cubeAssetPath)
         {
-            string absoluteCubePath = Path.GetFullPath(cubeAssetPath);
+            string absoluteCubePath = GetAbsoluteAssetPath(cubeAssetPath);
             CubeLutData lutData = ParseFile(absoluteCubePath);
             Texture2D texture = null;
 
@@ -138,7 +138,7 @@ namespace qsyi
                     throw new IOException("Failed to encode LUT texture to PNG.");
 
                 string generatedAssetPath = GetGeneratedAssetPath(cubeAssetPath);
-                string absoluteTexturePath = Path.GetFullPath(generatedAssetPath);
+                string absoluteTexturePath = GetAbsoluteAssetPath(generatedAssetPath);
                 Directory.CreateDirectory(Path.GetDirectoryName(absoluteTexturePath) ?? string.Empty);
                 File.WriteAllBytes(absoluteTexturePath, pngBytes);
 
@@ -223,7 +223,7 @@ namespace qsyi
 
         private static int ReadTextureDimension(string generatedAssetPath)
         {
-            string absoluteTexturePath = Path.GetFullPath(generatedAssetPath);
+            string absoluteTexturePath = GetAbsoluteAssetPath(generatedAssetPath);
             var probeTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
             try
             {
@@ -355,6 +355,24 @@ namespace qsyi
         private static bool TryParseFloat(string value, out float result)
         {
             return float.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out result);
+        }
+
+        private static string GetAbsoluteAssetPath(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath))
+                throw new ArgumentException("Asset path is null or empty.", nameof(assetPath));
+
+            string normalizedAssetPath = assetPath.Replace('\\', '/');
+            if (!normalizedAssetPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException($"Asset path must start with 'Assets/': {assetPath}", nameof(assetPath));
+
+            string projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (string.IsNullOrWhiteSpace(projectRoot))
+                throw new IOException("Failed to resolve Unity project root.");
+
+            string relativePath = normalizedAssetPath.Substring("Assets/".Length)
+                .Replace('/', Path.DirectorySeparatorChar);
+            return Path.Combine(projectRoot, "Assets", relativePath);
         }
 
         private static string[] SplitWhitespace(string line)

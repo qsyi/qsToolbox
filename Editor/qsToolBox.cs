@@ -1598,7 +1598,7 @@ namespace qsyi
             foreach (var boneName in BONE_ORDER)
             {
                 Transform foundBone = null;
-                
+
                 if (BONE_PARENT.TryGetValue(boneName, out var parentName) && boneMap.TryGetValue(parentName, out var parent))
                     foundBone = FindChildByKeyword(parent, boneName);
                 else

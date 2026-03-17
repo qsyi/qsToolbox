@@ -148,7 +148,7 @@ namespace qsyi
             finally
             {
                 if (texture != null)
-                    Object.DestroyImmediate(texture);
+                    UnityEngine.Object.DestroyImmediate(texture);
             }
         }
 
@@ -235,7 +235,7 @@ namespace qsyi
             }
             finally
             {
-                Object.DestroyImmediate(probeTexture);
+                UnityEngine.Object.DestroyImmediate(probeTexture);
             }
         }
 

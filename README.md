@@ -25,8 +25,10 @@
   - 衣装のスケールを素体に合わせて自動調整
   - MA Scale Adjusterにも対応
 
-- **.cube LUT変換**
-  - `.cube`ファイル をポストプロセス用の2D LUTテクスチャへ自動変換
+- **メニュー生成**
+  - `lilycalInventory` 用のメニューを探索対象から生成
+  - 個別生成・まとめて生成の両方に対応
+
 
 ## インストール方法 <a name="インストール方法"></a>
 - 推奨: VPMリポジトリの [**Add to VCC**](https://qsyi.github.io/vpm-repos/) を利用  
@@ -56,12 +58,15 @@
 
   - **スケールモード**  
     - アバターと衣装のスケールを同期
+    - `Position/Rotation` 同期にも対応（実験的機能）
     ![Scale](https://github.com/user-attachments/assets/fe991452-fe7d-460e-b191-7af80578e79a) 
 
-- **.cube LUT自動変換**
-  - `.cube` を追加すると同じフォルダに `*_lut.png` を自動生成
-  - そのままポストプロセスに追加可能
+  - **メニュー生成モード**
+    - `lilycalInventory` 用メニューを生成
+    - フォルダ名を指定して `Menu_` 接頭辞付きの親メニューを新規作成
+    - 選択レンダラーを個別メニュー、またはまとめメニューとして生成
 
 ## 動作環境 <a name="動作環境"></a>
 - Unity 2022.3.22f1 以降推奨  
 - [Modular Avatar](https://modular-avatar.nadena.dev/ja) v1.10.0以降が必要  
+- [lilycalInventory](https://github.com/lilxyzw/lilycalInventory) v1.5.2以降が必要  

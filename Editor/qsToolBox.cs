@@ -2,7 +2,6 @@
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
-using UnityEditorInternal;
 using System.Collections.Generic;
 using VRC.SDK3.Avatars.Components;
 using nadena.dev.modular_avatar.core;
@@ -16,12 +15,6 @@ namespace qsyi
     internal class QsToolBox : EditorWindow
     {
         private enum Mode { Material, BlendShape, Scale, MenuGenerator }
-        private enum MenuGenerationMode { PerRenderer, Combined }
-        private static readonly string[] MenuGenerationDescriptions =
-        {
-            "選択したものを一つずつメニューにします",
-            "選択したものを一つのメニューにまとめます"
-        };
         
         // Core Fields
         [SerializeField] private List<GameObject> _targets = new List<GameObject>();
@@ -29,6 +22,7 @@ namespace qsyi
         [SerializeField] private List<OutfitArmatureEntry> _outfitArmatureEntries = new List<OutfitArmatureEntry>();
         [SerializeField] private bool _autoScaleSyncEnabled;
         [SerializeField] private bool _autoSyncPositionAndRotation;
+        [SerializeField] private List<MenuRenderCard> _menuRenderCards = new List<MenuRenderCard>();
         
         private Mode _mode = Mode.Material;
         private Vector2 _scrollPosition;
@@ -43,9 +37,6 @@ namespace qsyi
         private readonly Dictionary<Material, List<(Renderer renderer, int slot)>> _materialUsage = new Dictionary<Material, List<(Renderer, int)>>();
         private readonly Dictionary<GameObject, Dictionary<string, Transform>> _outfitBones = new Dictionary<GameObject, Dictionary<string, Transform>>();
         private readonly Dictionary<string, Transform> _avatarBones = new Dictionary<string, Transform>();
-        [SerializeField] private List<Renderer> _menuRenderers = new List<Renderer>();
-        private readonly Dictionary<int, bool> _menuRendererSelection = new Dictionary<int, bool>();
-        
         // Compose Mode
         private SkinnedMeshRenderer _composeTarget;
         private string _baseShapeName = "";
@@ -54,7 +45,6 @@ namespace qsyi
         private readonly List<string> _shapeNames = new List<string>();
         private string _newShapeName = "";
         private bool _overwriteShape = true;
-        private MenuGenerationMode _menuGenerationMode = MenuGenerationMode.PerRenderer;
         private string _menuFolderName = "";
         
         // Cache Control
@@ -62,12 +52,12 @@ namespace qsyi
         private SerializedProperty _targetsProperty;
         private SerializedProperty _armatureProperty;
         private SerializedProperty _outfitArmatureEntriesProperty;
-        private SerializedProperty _menuRenderersProperty;
-        private ReorderableList _menuRenderersList;
         private int _targetHash = -1;
         private bool _isDirty = true;
         private bool _isApplyingAutoSync;
         private double _nextAutoSyncTime;
+        private int _previewCardIndex = -1;
+        private readonly Dictionary<GameObject, bool> _previewOriginalStates = new Dictionary<GameObject, bool>();
         private readonly Dictionary<string, (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale)> _avatarScaleCache
             = new Dictionary<string, (Vector3, Vector3, Quaternion, bool, Vector3)>();
         private static FieldInfo _adjustChildPositionsField;
@@ -124,6 +114,21 @@ namespace qsyi
             public List<Transform> Armatures = new List<Transform>();
             [HideInInspector] public bool AutoAssigned;
         }
+
+        [System.Serializable]
+        private class MenuRenderCard
+        {
+            public string Name = "";
+            public bool Preview;
+            public List<MenuRenderEntry> Entries = new List<MenuRenderEntry>();
+        }
+
+        [System.Serializable]
+        private class MenuRenderEntry
+        {
+            public SkinnedMeshRenderer Renderer;
+            public bool ActiveWhenOn;
+        }
         
         [MenuItem("Tools/qs/ツールボックス %q")]
         public static void ShowWindow()
@@ -147,6 +152,8 @@ namespace qsyi
             if (_autoScaleSyncEnabled)
                 SetAutoScaleSyncEnabled(false);
 
+            RestorePreviewStates();
+
             EditorApplication.hierarchyChanged -= OnHierarchyChanged;
             Undo.postprocessModifications -= OnUndo;
             EditorApplication.update -= OnEditorUpdate;
@@ -158,10 +165,8 @@ namespace qsyi
             _targetsProperty = _serializedObject.FindProperty("_targets");
             _armatureProperty = _serializedObject.FindProperty("_avatarArmature");
             _outfitArmatureEntriesProperty = _serializedObject.FindProperty("_outfitArmatureEntries");
-            _menuRenderersProperty = _serializedObject.FindProperty("_menuRenderers");
             _targetsProperty.isExpanded = true;
             _outfitArmatureEntriesProperty.isExpanded = true;
-            InitializeMenuRenderersList();
         }
         
         private void OnHierarchyChanged() => _isDirty = true;
@@ -1354,10 +1359,10 @@ namespace qsyi
                     ScanForCompose();
                     break;
                 case Mode.Scale: ScanBones(); break;
-                case Mode.MenuGenerator: ScanMenuRenderers(); break;
+                case Mode.MenuGenerator: break;
             }
         }
-
+        
         private void DrawMenuGenerator()
         {
             using (new EditorGUILayout.VerticalScope())
@@ -1365,77 +1370,48 @@ namespace qsyi
                 DrawColoredBox(HeaderColor, () =>
                 {
                     EditorGUILayout.LabelField("メニュー生成", EditorStyles.boldLabel);
-                    EditorGUILayout.HelpBox("lilycalInventory用のメニュー生成設定です。\nフォルダ名と対象レンダラーを指定して、メニューを生成します。", MessageType.Info);
-                    _menuFolderName = EditorGUILayout.TextField(new GUIContent("メニューフォルダ名", "生成先フォルダ名"), _menuFolderName);
-                });
-
-                DrawColoredBox(BaseColor, () =>
-                {
-                    EditorGUILayout.LabelField("生成方法", EditorStyles.boldLabel);
-                    DrawTabButtons(
-                        new[] { "個別に生成", "まとめて生成" },
-                        new[]
-                        {
-                            new GUIContent("個別に生成"),
-                            new GUIContent("まとめて生成")
-                        },
-                        (int)_menuGenerationMode,
-                        index => _menuGenerationMode = (MenuGenerationMode)index,
-                        false
-                    );
-
-                    EditorGUILayout.Space(4f);
-                    EditorGUILayout.HelpBox(MenuGenerationDescriptions[(int)_menuGenerationMode], MessageType.None);
+                    _menuFolderName = EditorGUILayout.TextField(new GUIContent("フォルダ名", "生成先フォルダ名"), _menuFolderName);
+                    if (string.IsNullOrWhiteSpace(_menuFolderName))
+                        EditorGUILayout.HelpBox("フォルダ名を入力してください。", MessageType.Warning);
                 });
 
                 DrawColoredBox(ContentColor, () =>
                 {
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        EditorGUILayout.LabelField("探索配下のメッシュレンダラー", EditorStyles.boldLabel);
-
-                        if (GUILayout.Button("全選択", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
-                            SetAllMenuRendererSelections(true);
-
-                        if (GUILayout.Button("全解除", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
-                            SetAllMenuRendererSelections(false);
-                    }
-
-                    if (_menuRenderers.Count == 0)
-                    {
-                        EditorGUILayout.HelpBox("探索対象配下にメッシュレンダラーが見つかりません。", MessageType.Info);
-                    }
-
-                    EditorGUILayout.LabelField($"検出数: {_menuRenderers.Count} / 選択数: {GetSelectedMenuRendererCount()}");
+                    EditorGUILayout.LabelField("生成対象", EditorStyles.boldLabel);
                     _menuRendererScroll = EditorGUILayout.BeginScrollView(_menuRendererScroll, GUILayout.ExpandHeight(true));
-                    DrawMenuRendererArray();
+                    DrawMenuRenderCards();
                     EditorGUILayout.EndScrollView();
+
+                    if (GUILayout.Button("メニューを追加", GUILayout.Width(120f), GUILayout.Height(28f)))
+                        AddMenuRenderCard();
                 });
 
                 DrawMenuGenerateExecuteButton();
             }
+
+            SyncPreviewState();
         }
 
         private void DrawMenuGenerateExecuteButton()
         {
             DrawColoredBox(SelectColor, () =>
             {
-                bool hasSelection = GetSelectedMenuRendererCount() > 0;
-                GUI.enabled = hasSelection;
-                if (GUILayout.Button("メニュー生成", GUILayout.Height(EXECUTE_BUTTON_HEIGHT)))
+                bool canGenerate = CanGenerateMenu();
+                GUI.enabled = canGenerate;
+                if (GUILayout.Button("生成", GUILayout.Height(EXECUTE_BUTTON_HEIGHT)))
                     GenerateMenu();
                 GUI.enabled = true;
 
-                if (!hasSelection)
-                    EditorGUILayout.HelpBox("メニューを生成するには対象レンダラーを 1 つ以上選択してください。", MessageType.Info);
+                if (!canGenerate && !string.IsNullOrWhiteSpace(_menuFolderName))
+                    EditorGUILayout.HelpBox(GetMenuGenerateWarningMessage(), MessageType.Warning);
             });
         }
 
         private void GenerateMenu()
         {
-            var parentTarget = _targets.FirstOrDefault(IsValidTarget);
-            var selectedRenderers = GetSelectedMenuRenderers();
-            if (parentTarget == null || selectedRenderers.Count == 0)
+            var parentTarget = FindMenuGenerationRoot();
+            var cardsToGenerate = GetGeneratableMenuRenderCards();
+            if (parentTarget == null || cardsToGenerate.Count == 0)
                 return;
 
             int undoGroup = Undo.GetCurrentGroup();
@@ -1452,19 +1428,15 @@ namespace qsyi
                 ConfigureFolderMenuItem(menuItem);
                 var generatedItemNames = new List<string>();
 
-                if (_menuGenerationMode == MenuGenerationMode.PerRenderer)
+                foreach (var card in cardsToGenerate)
                 {
-                    foreach (var renderer in selectedRenderers)
-                    {
-                        CreateToggleObject(folderObject.transform, renderer.name, new[] { renderer.gameObject });
-                        generatedItemNames.Add(renderer.name);
-                    }
-                }
-                else
-                {
-                    string mergedName = string.Join("/", selectedRenderers.Select(r => r.name));
-                    CreateToggleObject(folderObject.transform, mergedName, selectedRenderers.Select(r => r.gameObject));
-                    generatedItemNames.Add(mergedName);
+                    string itemName = GetMenuRenderCardName(card);
+                    CreateToggleObject(
+                        folderObject.transform,
+                        itemName,
+                        card.Entries.Select(entry => entry?.Renderer != null ? entry.Renderer.gameObject : null),
+                        card.Entries.Select(entry => entry != null && entry.ActiveWhenOn));
+                    generatedItemNames.Add(itemName);
                 }
 
                 EditorUtility.SetDirty(folderObject);
@@ -1473,16 +1445,33 @@ namespace qsyi
                     "メニュー生成",
                     BuildMenuGeneratedDialogMessage(folderName, generatedItemNames),
                     "OK");
-                Debug.Log($"[qsToolBox] Generated menu '{folderObject.name}' with {selectedRenderers.Count} renderer target(s).");
+                Debug.Log($"[qsToolBox] Generated menu '{folderObject.name}' with {generatedItemNames.Count} item(s).");
             }
             finally
             {
                 Undo.CollapseUndoOperations(undoGroup);
-            }
-        }
+              }
+          }
 
-        private string GetGeneratedMenuFolderName()
+        private GameObject FindMenuGenerationRoot()
         {
+            foreach (var target in _targets.Where(IsValidTarget))
+            {
+                var current = target.transform;
+                while (current != null)
+                {
+                    if (current.GetComponent<VRCAvatarDescriptor>() != null)
+                        return current.gameObject;
+
+                    current = current.parent;
+                }
+            }
+
+            return _targets.FirstOrDefault(IsValidTarget);
+        }
+  
+          private string GetGeneratedMenuFolderName()
+          {
             string baseName = string.IsNullOrWhiteSpace(_menuFolderName)
                 ? _targets.FirstOrDefault(IsValidTarget)?.name ?? "Menu"
                 : _menuFolderName.Trim();
@@ -1506,18 +1495,23 @@ namespace qsyi
             EditorUtility.SetDirty(menuItem);
         }
 
-        private void CreateToggleObject(Transform parent, string objectName, IEnumerable<GameObject> targetObjects)
+        private void CreateToggleObject(Transform parent, string objectName, IEnumerable<GameObject> targetObjects, IEnumerable<bool> activeWhenOnValues)
         {
             var toggleObject = new GameObject(objectName);
             Undo.RegisterCreatedObjectUndo(toggleObject, "Generate Menu");
             toggleObject.transform.SetParent(parent, false);
 
             var itemToggler = Undo.AddComponent<ItemToggler>(toggleObject);
-            ConfigureItemToggler(itemToggler, targetObjects.Where(target => target != null).Distinct().ToList());
+            ConfigureItemToggler(
+                itemToggler,
+                targetObjects.Zip(activeWhenOnValues, (target, isOn) => (target, isOn))
+                    .Where(pair => pair.target != null)
+                    .Distinct()
+                    .ToList());
             EditorUtility.SetDirty(toggleObject);
         }
 
-        private void ConfigureItemToggler(ItemToggler itemToggler, IReadOnlyList<GameObject> targetObjects)
+        private void ConfigureItemToggler(ItemToggler itemToggler, IReadOnlyList<(GameObject target, bool activeWhenOn)> targetObjects)
         {
             var serializedObject = new SerializedObject(itemToggler);
             serializedObject.Update();
@@ -1537,8 +1531,8 @@ namespace qsyi
             for (int i = 0; i < targetObjects.Count; i++)
             {
                 var objectElement = objectsProperty.GetArrayElementAtIndex(i);
-                objectElement.FindPropertyRelative("obj").objectReferenceValue = targetObjects[i];
-                objectElement.FindPropertyRelative("value").boolValue = false;
+                objectElement.FindPropertyRelative("obj").objectReferenceValue = targetObjects[i].target;
+                objectElement.FindPropertyRelative("value").boolValue = targetObjects[i].activeWhenOn;
             }
 
             parameterProperty.FindPropertyRelative("blendShapeModifiers").arraySize = 0;
@@ -1557,41 +1551,6 @@ namespace qsyi
             lines.Add(string.Empty);
             lines.Add("メニューを生成しました");
             return string.Join("\n", lines);
-        }
-
-        private void ScanMenuRenderers()
-        {
-            if (string.IsNullOrWhiteSpace(_menuFolderName))
-            {
-                var firstTarget = _targets.FirstOrDefault(IsValidTarget);
-                if (firstTarget != null)
-                    _menuFolderName = firstTarget.name;
-            }
-
-            foreach (var gameObject in _targets.Where(IsValidTarget))
-            {
-                foreach (var renderer in gameObject.GetComponentsInChildren<Renderer>(true))
-                {
-                    if (!IsMenuRendererCandidate(renderer) || _menuRenderers.Contains(renderer))
-                        continue;
-
-                    _menuRenderers.Add(renderer);
-
-                    int instanceId = renderer.GetInstanceID();
-                    if (!_menuRendererSelection.ContainsKey(instanceId))
-                        _menuRendererSelection[instanceId] = false;
-                }
-            }
-
-            _menuRenderers = _menuRenderers
-                .Where(renderer => renderer == null || IsMenuRendererCandidate(renderer))
-                .Distinct()
-                .ToList();
-
-            var activeIds = _menuRenderers.Where(r => r != null).Select(r => r.GetInstanceID()).ToHashSet();
-            var staleIds = _menuRendererSelection.Keys.Where(id => !activeIds.Contains(id)).ToArray();
-            foreach (var staleId in staleIds)
-                _menuRendererSelection.Remove(staleId);
         }
         
         private void ScanSkinnedMeshRenderers()
@@ -1793,96 +1752,337 @@ namespace qsyi
             GUI.backgroundColor = originalColor;
         }
 
-        private void InitializeMenuRenderersList()
+        private void DrawMenuRenderCards()
         {
-            _menuRenderersList = new ReorderableList(_serializedObject, _menuRenderersProperty, true, false, true, true);
-            _menuRenderersList.elementHeight = EditorGUIUtility.singleLineHeight + 4f;
-            _menuRenderersList.drawElementCallback = (rect, index, isActive, isFocused) =>
+            EnsureAtLeastOneMenuRenderCard();
+
+            if (_menuRenderCards.Count == 0)
             {
-                SerializedProperty element = _menuRenderersProperty.GetArrayElementAtIndex(index);
-                var renderer = element.objectReferenceValue as Renderer;
-                int instanceId = renderer != null ? renderer.GetInstanceID() : 0;
-                bool isSelected = renderer != null &&
-                    _menuRendererSelection.TryGetValue(instanceId, out bool selected) &&
-                    selected;
+                EditorGUILayout.HelpBox("メニューを追加して対象を設定してください。", MessageType.Info);
+            }
 
-                rect.y += 2f;
-                Rect toggleRect = new Rect(rect.x, rect.y, 18f, EditorGUIUtility.singleLineHeight);
-                Rect fieldRect = new Rect(rect.x + 22f, rect.y, rect.width - 22f, EditorGUIUtility.singleLineHeight);
+            for (int i = 0; i < _menuRenderCards.Count; i++)
+                DrawMenuRenderCard(i);
+        }
 
-                bool newSelected = EditorGUI.Toggle(toggleRect, isSelected);
-                if (renderer != null && newSelected != isSelected)
-                    _menuRendererSelection[instanceId] = newSelected;
+        private void AddMenuRenderCard()
+        {
+            _menuRenderCards.Add(new MenuRenderCard
+            {
+                Preview = false
+            });
+        }
 
-                EditorGUI.BeginChangeCheck();
-                Object newValue = EditorGUI.ObjectField(fieldRect, GUIContent.none, element.objectReferenceValue, typeof(Renderer), true);
-                if (EditorGUI.EndChangeCheck())
+        private void DrawMenuRenderCard(int index)
+        {
+            MenuRenderCard card = _menuRenderCards[index];
+
+            DrawColoredBox(BaseColor, () =>
+            {
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    element.objectReferenceValue = IsMenuRendererCandidate(newValue as Renderer) ? newValue : null;
-                    if (renderer != null && renderer != newValue)
-                        _menuRendererSelection.Remove(instanceId);
+                    EditorGUILayout.LabelField($"メニュー{index + 1}", GUILayout.Width(56f));
+                    card.Name = EditorGUILayout.TextField(card.Name, GUILayout.Width(180f));
+                    GUILayout.FlexibleSpace();
+
+                    bool previewValue = EditorGUILayout.Toggle(card.Preview, GUILayout.Width(16f));
+                    if (previewValue != card.Preview)
+                        SetPreviewCard(index, previewValue);
+
+                    EditorGUILayout.LabelField("プレビュー", GUILayout.Width(56f));
+
+                    if (GUILayout.Button("削除", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
+                    {
+                        RemoveMenuRenderCard(index);
+                        GUIUtility.ExitGUI();
+                    }
                 }
-            };
-            _menuRenderersList.onRemoveCallback = list =>
-            {
-                SerializedProperty element = list.serializedProperty.GetArrayElementAtIndex(list.index);
-                if (element.objectReferenceValue is Renderer renderer)
-                    _menuRendererSelection.Remove(renderer.GetInstanceID());
 
-                ReorderableList.defaultBehaviours.DoRemoveButton(list);
-            };
-            _menuRenderersList.onAddCallback = list =>
-            {
-                int index = list.serializedProperty.arraySize;
-                list.serializedProperty.InsertArrayElementAtIndex(index);
-                list.serializedProperty.GetArrayElementAtIndex(index).objectReferenceValue = null;
-            };
+                if (card.Entries.Count > 0)
+                    EditorGUILayout.Space(4f);
+
+                for (int i = 0; i < card.Entries.Count; i++)
+                    DrawMenuRenderEntryRow(card, i);
+
+                EditorGUILayout.Space(4f);
+                DrawRendererDropArea(card, index);
+            });
         }
 
-        private void DrawMenuRendererArray()
+        private void RemoveMenuRenderCard(int index)
         {
-            _serializedObject.Update();
-            _menuRenderersList.DoLayoutList();
-            _serializedObject.ApplyModifiedProperties();
+            if (_previewCardIndex == index)
+                RestorePreviewStates();
+            else if (_previewCardIndex > index)
+                _previewCardIndex--;
+
+            _menuRenderCards.RemoveAt(index);
+            EnsureAtLeastOneMenuRenderCard();
         }
 
-        private void SetAllMenuRendererSelections(bool isSelected)
+        private bool CanGenerateMenu()
         {
-            foreach (var renderer in _menuRenderers.Where(r => r != null))
-                _menuRendererSelection[renderer.GetInstanceID()] = isSelected;
+            return !string.IsNullOrWhiteSpace(_menuFolderName) &&
+                GetGeneratableMenuRenderCards().Count > 0;
         }
 
-        private int GetSelectedMenuRendererCount()
+        private List<MenuRenderCard> GetGeneratableMenuRenderCards()
         {
-            return _menuRenderers.Count(renderer =>
-                renderer != null &&
-                _menuRendererSelection.TryGetValue(renderer.GetInstanceID(), out bool isRendererSelected) &&
-                isRendererSelected);
-        }
-
-        private List<Renderer> GetSelectedMenuRenderers()
-        {
-            return _menuRenderers
-                .Where(renderer =>
-                    renderer != null &&
-                    _menuRendererSelection.TryGetValue(renderer.GetInstanceID(), out bool isRendererSelected) &&
-                    isRendererSelected)
-                .Distinct()
+            return _menuRenderCards
+                .Where(card => card != null)
+                .Select(card =>
+                {
+                    card.Entries = card.Entries
+                        .Where(entry => entry != null && IsValidMenuRenderer(entry.Renderer))
+                        .GroupBy(entry => entry.Renderer)
+                        .Select(group => group.First())
+                        .ToList();
+                    return card;
+                })
+                .Where(card => card.Entries.Count > 0)
                 .ToList();
         }
 
-        private bool IsMenuRendererCandidate(Renderer renderer)
+        private string GetMenuRenderCardName(MenuRenderCard card)
         {
-            if (renderer == null)
-                return false;
+            if (!string.IsNullOrWhiteSpace(card.Name))
+                return card.Name.Trim();
 
-            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer)
-                return skinnedMeshRenderer.sharedMesh != null;
+            return string.Join("/", card.Entries
+                .Where(entry => entry?.Renderer != null)
+                .Select(entry => entry.Renderer.name)
+                .Distinct());
+        }
 
-            if (renderer is MeshRenderer meshRenderer)
-                return meshRenderer.GetComponent<MeshFilter>()?.sharedMesh != null;
+        private void EnsureAtLeastOneMenuRenderCard()
+        {
+            if (_menuRenderCards.Count > 0)
+                return;
 
-            return false;
+            _menuRenderCards.Add(new MenuRenderCard
+            {
+                Preview = false
+            });
+        }
+
+        private void DrawRendererDropArea(MenuRenderCard card, int cardIndex)
+        {
+            Rect dropArea = GUILayoutUtility.GetRect(0f, 30f, GUILayout.ExpandWidth(true));
+            GUI.Box(dropArea, "メッシュをここにドラッグ&ドロップ");
+
+            Event currentEvent = Event.current;
+            if (!dropArea.Contains(currentEvent.mousePosition))
+                return;
+
+            if (currentEvent.type != EventType.DragUpdated && currentEvent.type != EventType.DragPerform)
+                return;
+
+            var draggedRenderers = ExtractDraggedMenuRenderers(DragAndDrop.objectReferences);
+
+            if (draggedRenderers.Count == 0)
+                return;
+
+            DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+
+            if (currentEvent.type == EventType.DragPerform)
+            {
+                DragAndDrop.AcceptDrag();
+
+                var existing = new HashSet<SkinnedMeshRenderer>(
+                    card.Entries.Where(entry => entry?.Renderer != null).Select(entry => entry.Renderer));
+
+                foreach (var renderer in draggedRenderers)
+                {
+                    if (existing.Contains(renderer))
+                        continue;
+
+                    card.Entries.Add(new MenuRenderEntry
+                    {
+                        Renderer = renderer,
+                        ActiveWhenOn = false
+                    });
+                    AutoFillMenuRenderCardName(card, renderer);
+                    existing.Add(renderer);
+                }
+
+                GUI.changed = true;
+            }
+
+            currentEvent.Use();
+        }
+
+        private List<SkinnedMeshRenderer> ExtractDraggedMenuRenderers(Object[] draggedObjects)
+        {
+            var renderers = new List<SkinnedMeshRenderer>();
+            if (draggedObjects == null)
+                return renderers;
+
+            foreach (var draggedObject in draggedObjects)
+            {
+                var renderer = ResolveDraggedMenuRenderer(draggedObject);
+                if (renderer != null && !renderers.Contains(renderer))
+                    renderers.Add(renderer);
+            }
+
+            return renderers;
+        }
+
+        private SkinnedMeshRenderer ResolveDraggedMenuRenderer(Object draggedObject)
+        {
+            if (draggedObject == null)
+                return null;
+
+            if (draggedObject is SkinnedMeshRenderer skinnedMeshRenderer)
+                return IsValidMenuRenderer(skinnedMeshRenderer) ? skinnedMeshRenderer : null;
+
+            if (draggedObject is GameObject gameObject)
+            {
+                var rendererFromGameObject = gameObject.GetComponent<SkinnedMeshRenderer>();
+                return IsValidMenuRenderer(rendererFromGameObject) ? rendererFromGameObject : null;
+            }
+
+            if (draggedObject is Component component)
+            {
+                var rendererFromComponent = component.GetComponent<SkinnedMeshRenderer>();
+                return IsValidMenuRenderer(rendererFromComponent) ? rendererFromComponent : null;
+            }
+
+            return null;
+        }
+
+        private void DrawMenuRenderEntryRow(MenuRenderCard card, int index)
+        {
+            MenuRenderEntry entry = card.Entries[index];
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                int popupIndex = entry.ActiveWhenOn ? 0 : 1;
+                int newPopupIndex = EditorGUILayout.Popup(popupIndex, new[] { "ON", "OFF" }, GUILayout.Width(52f));
+                entry.ActiveWhenOn = newPopupIndex == 0;
+
+                EditorGUI.BeginChangeCheck();
+                var newRenderer = (SkinnedMeshRenderer)EditorGUILayout.ObjectField(
+                    entry.Renderer,
+                    typeof(SkinnedMeshRenderer),
+                    true);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    entry.Renderer = IsValidMenuRenderer(newRenderer) ? newRenderer : null;
+                    AutoFillMenuRenderCardName(card, entry.Renderer);
+                }
+
+                if (GUILayout.Button("削除", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
+                {
+                    bool shouldReapplyPreview = _previewCardIndex >= 0 &&
+                        _previewCardIndex < _menuRenderCards.Count &&
+                        ReferenceEquals(_menuRenderCards[_previewCardIndex], card);
+
+                    if (shouldReapplyPreview)
+                        RestorePreviewStates();
+
+                    card.Entries.RemoveAt(index);
+
+                    if (shouldReapplyPreview)
+                        ApplyPreviewState(_previewCardIndex);
+
+                    GUIUtility.ExitGUI();
+                }
+            }
+        }
+
+        private bool IsValidMenuRenderer(SkinnedMeshRenderer renderer)
+        {
+            return renderer != null && renderer.sharedMesh != null;
+        }
+
+        private string GetMenuGenerateWarningMessage()
+        {
+            if (string.IsNullOrWhiteSpace(_menuFolderName))
+                return "フォルダ名を入力してください。";
+
+            return "メニューを生成するには対象を含むカードを 1 つ以上追加してください。";
+        }
+
+        private void AutoFillMenuRenderCardName(MenuRenderCard card, SkinnedMeshRenderer renderer)
+        {
+            if (card == null || renderer == null || !string.IsNullOrWhiteSpace(card.Name))
+                return;
+
+            card.Name = renderer.name;
+        }
+
+        private void SetPreviewCard(int index, bool enabled)
+        {
+            for (int i = 0; i < _menuRenderCards.Count; i++)
+                _menuRenderCards[i].Preview = enabled && i == index;
+        }
+
+        private void SyncPreviewState()
+        {
+            int newPreviewIndex = _menuRenderCards.FindIndex(card => card != null && card.Preview);
+            if (newPreviewIndex == _previewCardIndex)
+            {
+                if (newPreviewIndex >= 0)
+                    ReapplyPreviewState();
+                return;
+            }
+
+            RestorePreviewStates();
+            if (newPreviewIndex >= 0)
+                ApplyPreviewState(newPreviewIndex);
+        }
+
+        private void ApplyPreviewState(int cardIndex)
+        {
+            if (cardIndex < 0 || cardIndex >= _menuRenderCards.Count)
+                return;
+
+            var card = _menuRenderCards[cardIndex];
+            if (card == null)
+                return;
+
+            _previewOriginalStates.Clear();
+            foreach (var entry in card.Entries.Where(entry => entry?.Renderer != null))
+            {
+                var target = entry.Renderer.gameObject;
+                if (!_previewOriginalStates.ContainsKey(target))
+                    _previewOriginalStates[target] = target.activeSelf;
+
+                target.SetActive(entry.ActiveWhenOn);
+            }
+
+            _previewCardIndex = cardIndex;
+        }
+
+        private void ReapplyPreviewState()
+        {
+            if (_previewCardIndex < 0 || _previewCardIndex >= _menuRenderCards.Count)
+                return;
+
+            var card = _menuRenderCards[_previewCardIndex];
+            if (card == null)
+                return;
+
+            foreach (var entry in card.Entries.Where(entry => entry?.Renderer != null))
+            {
+                var target = entry.Renderer.gameObject;
+                if (!_previewOriginalStates.ContainsKey(target))
+                    _previewOriginalStates[target] = target.activeSelf;
+
+                target.SetActive(entry.ActiveWhenOn);
+            }
+        }
+
+        private void RestorePreviewStates()
+        {
+            foreach (var pair in _previewOriginalStates)
+            {
+                if (pair.Key != null)
+                    pair.Key.SetActive(pair.Value);
+            }
+
+            _previewOriginalStates.Clear();
+            _previewCardIndex = -1;
         }
 
         private bool IsValidTarget(GameObject target) => target != null && !target.CompareTag("EditorOnly");

@@ -11,33 +11,32 @@
 
 ## 概要 <a name="概要"></a>
 - **ワンクリックで作業効率を向上**
-  - `Ctrl + E`で選択オブジェクトを`EditorOnly`に切り替え
-  - ホームボタンでAssets直下にジャンプ、ブックマークでよく使うフォルダへ即移動
-  - `Ctrl + Q`で各機能をまとめたツールウィンドウを呼び出し可能  
+  - `Ctrl + E` で選択オブジェクトを `EditorOnly` に切り替え
+  - ホームボタンで Assets 直下にジャンプ、ブックマークでよく使うフォルダへ即移動
+  - `Ctrl + Q` で各機能をまとめたツールウィンドウを呼び出し可能
 
 - **マテリアル操作**
   - 色違いのマテリアルへの差し替えを簡単に
 
 - **シェイプキー管理**
-  - まとめて変更や合成、まばたき修正、シェイプキーの限界突破にも対応
+  - まとめて変更や合成に対応
 
 - **スケール調整**
   - 衣装のスケールを素体に合わせて自動調整
-  - MA Scale Adjusterにも対応
+  - MA Scale Adjuster に対応
 
 - **メニュー生成**
-  - `lilycalInventory` 用のメニューを探索対象から生成
-  - 個別生成・まとめて生成の両方に対応
-
+  - `lilycalInventory` 用のメニューをまとめて生成
+  - メッシュ一覧の選択、プレビューに対応
 
 ## インストール方法 <a name="インストール方法"></a>
 - 推奨: VPMリポジトリの [**Add to VCC**](https://qsyi.github.io/vpm-repos/) を利用  
-- 代替: [最新リリース](https://github.com/qsyi/qsToolbox/releases/latest) の`.unitypackage`をインポート  
+- 代替: [最新リリース](https://github.com/qsyi/qsToolbox/releases/latest) の `.unitypackage` をインポート  
 
 ## 主な機能一覧 <a name="主な機能一覧"></a>
 
 - **ToggleEditorOnly**  
-  - `Ctrl + E`で選択オブジェクトを`EditorOnly`化し非アクティブに  
+  - `Ctrl + E` で選択オブジェクトを `EditorOnly` 化し非アクティブに  
 
 - **BookmarkOverlay**
   - ホーム: Assets直下に戻る  
@@ -46,25 +45,27 @@
   ![BookmarkOverlay](https://github.com/user-attachments/assets/60e88bac-3241-4d64-a553-844115eca533)  
 
 - **qsToolBoxウィンドウ**  
-  - `Ctrl + Q`で呼び出し  
+  - `Ctrl + Q` で呼び出し  
   - 配下のマテリアルやシェイプキーを自動探索  
 
-  - **マテリアルモード**  
-    - マテリアル差し替え
-    ![MaterialChange](https://github.com/user-attachments/assets/c1cd173a-fc52-43b8-82e7-0cc0ae01e1ae)
+- **マテリアルモード**  
+  - マテリアル差し替え  
+  ![MaterialChange](https://github.com/user-attachments/assets/c1cd173a-fc52-43b8-82e7-0cc0ae01e1ae)
 
-  - **ブレンドシェイプモード**  
-    - シェイプキー合成
+- **ブレンドシェイプモード**  
+  - シェイプキー合成
 
-  - **スケールモード**  
-    - アバターと衣装のスケールを同期
-    - `Position/Rotation` 同期にも対応（実験的機能）
-    ![Scale](https://github.com/user-attachments/assets/fe991452-fe7d-460e-b191-7af80578e79a) 
+- **スケールモード**  
+  - アバターと衣装のスケールを同期
+  - `Position` / `Rotation` は個別トグルで同期可能
+  - ボーン参照の確認と差し替えに対応
+  ![Scale](https://github.com/user-attachments/assets/fe991452-fe7d-460e-b191-7af80578e79a) 
 
-  - **メニュー生成モード**
-    - `lilycalInventory` 用メニューを生成
-    - フォルダ名を指定して `Menu_` 接頭辞付きの親メニューを新規作成
-    - 選択レンダラーを個別メニュー、またはまとめメニューとして生成
+- **メニュー生成モード**
+  - 探索対象配下のメッシュを一覧表示
+  - チェックしたメッシュだけまとめてメニュー化
+  - `EditorOnly` は自動除外
+  - プレビューでチェック済みメッシュを一時的に非表示化
 
 ## 動作環境 <a name="動作環境"></a>
 - Unity 2022.3.22f1 以降推奨  

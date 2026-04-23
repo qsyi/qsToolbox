@@ -2,6 +2,7 @@
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityEditorInternal;
 using System.Collections.Generic;
 using VRC.SDK3.Avatars.Components;
 using nadena.dev.modular_avatar.core;
@@ -21,8 +22,10 @@ namespace qsyi
         [SerializeField] private Transform _avatarArmature;
         [SerializeField] private List<OutfitArmatureEntry> _outfitArmatureEntries = new List<OutfitArmatureEntry>();
         [SerializeField] private bool _autoScaleSyncEnabled;
-        [SerializeField] private bool _autoSyncPositionAndRotation;
-        [SerializeField] private List<MenuRenderCard> _menuRenderCards = new List<MenuRenderCard>();
+        [SerializeField] private bool _autoSyncPosition;
+        [SerializeField] private bool _autoSyncRotation;
+        [SerializeField] private bool _menuPreviewEnabled = true;
+        [SerializeField] private List<MenuMeshEntry> _menuMeshEntries = new List<MenuMeshEntry>();
         
         private Mode _mode = Mode.Material;
         private Vector2 _scrollPosition;
@@ -52,12 +55,13 @@ namespace qsyi
         private SerializedProperty _targetsProperty;
         private SerializedProperty _armatureProperty;
         private SerializedProperty _outfitArmatureEntriesProperty;
+        private SerializedProperty _menuMeshEntriesProperty;
+        private ReorderableList _menuMeshEntriesList;
         private int _targetHash = -1;
         private bool _isDirty = true;
         private bool _isApplyingAutoSync;
         private double _nextAutoSyncTime;
-        private int _previewCardIndex = -1;
-        private readonly Dictionary<GameObject, bool> _previewOriginalStates = new Dictionary<GameObject, bool>();
+        private readonly Dictionary<GameObject, bool> _menuPreviewOriginalStates = new Dictionary<GameObject, bool>();
         private readonly Dictionary<string, (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale)> _avatarScaleCache
             = new Dictionary<string, (Vector3, Vector3, Quaternion, bool, Vector3)>();
         private static FieldInfo _adjustChildPositionsField;
@@ -116,18 +120,10 @@ namespace qsyi
         }
 
         [System.Serializable]
-        private class MenuRenderCard
-        {
-            public string Name = "";
-            public bool Preview;
-            public List<MenuRenderEntry> Entries = new List<MenuRenderEntry>();
-        }
-
-        [System.Serializable]
-        private class MenuRenderEntry
+        private class MenuMeshEntry
         {
             public SkinnedMeshRenderer Renderer;
-            public bool ActiveWhenOn;
+            public bool Include;
         }
         
         [MenuItem("Tools/qs/ツールボックス %q")]
@@ -152,7 +148,7 @@ namespace qsyi
             if (_autoScaleSyncEnabled)
                 SetAutoScaleSyncEnabled(false);
 
-            RestorePreviewStates();
+            RestoreMenuPreviewState();
 
             EditorApplication.hierarchyChanged -= OnHierarchyChanged;
             Undo.postprocessModifications -= OnUndo;
@@ -165,8 +161,42 @@ namespace qsyi
             _targetsProperty = _serializedObject.FindProperty("_targets");
             _armatureProperty = _serializedObject.FindProperty("_avatarArmature");
             _outfitArmatureEntriesProperty = _serializedObject.FindProperty("_outfitArmatureEntries");
+            _menuMeshEntriesProperty = _serializedObject.FindProperty("_menuMeshEntries");
             _targetsProperty.isExpanded = true;
             _outfitArmatureEntriesProperty.isExpanded = true;
+            InitializeMenuMeshEntriesList();
+        }
+
+        private void InitializeMenuMeshEntriesList()
+        {
+            _menuMeshEntriesList = new ReorderableList(_serializedObject, _menuMeshEntriesProperty, true, true, true, true);
+            _menuMeshEntriesList.drawHeaderCallback = rect =>
+            {
+                EditorGUI.LabelField(rect, "生成対象");
+            };
+            _menuMeshEntriesList.drawElementCallback = (rect, index, isActive, isFocused) =>
+            {
+                var element = _menuMeshEntriesProperty.GetArrayElementAtIndex(index);
+                var includeProperty = element.FindPropertyRelative("Include");
+                var rendererProperty = element.FindPropertyRelative("Renderer");
+
+                rect.y += 2f;
+                var toggleRect = new Rect(rect.x, rect.y, 18f, EditorGUIUtility.singleLineHeight);
+                var fieldRect = new Rect(rect.x + 22f, rect.y, rect.width - 22f, EditorGUIUtility.singleLineHeight);
+
+                includeProperty.boolValue = EditorGUI.Toggle(toggleRect, includeProperty.boolValue);
+                EditorGUI.PropertyField(fieldRect, rendererProperty, GUIContent.none);
+            };
+            _menuMeshEntriesList.elementHeight = EditorGUIUtility.singleLineHeight + 4f;
+            _menuMeshEntriesList.onAddCallback = list =>
+            {
+                int index = _menuMeshEntriesProperty.arraySize;
+                _menuMeshEntriesProperty.arraySize++;
+                var element = _menuMeshEntriesProperty.GetArrayElementAtIndex(index);
+                element.FindPropertyRelative("Renderer").objectReferenceValue = null;
+                element.FindPropertyRelative("Include").boolValue = false;
+                _serializedObject.ApplyModifiedProperties();
+            };
         }
         
         private void OnHierarchyChanged() => _isDirty = true;
@@ -231,6 +261,8 @@ namespace qsyi
             {
                 if (_autoScaleSyncEnabled && _mode != (Mode)index)
                     SetAutoScaleSyncEnabled(false);
+                if (_mode == Mode.MenuGenerator && _mode != (Mode)index)
+                    RestoreMenuPreviewState();
 
                 _mode = (Mode)index;
                 GUI.FocusControl(null);
@@ -920,8 +952,9 @@ namespace qsyi
                         {
                             EditorGUILayout.LabelField(boneName, EditorStyles.boldLabel);
 
+                            avatarBone = DrawBoneReferenceField("Transform", boneName, avatarBone);
                             EditorGUI.BeginChangeCheck();
-                            Vector3 newTransformScale = EditorGUILayout.Vector3Field("Transform", avatarBone.localScale);
+                            Vector3 newTransformScale = EditorGUILayout.Vector3Field(GUIContent.none, avatarBone.localScale);
                             if (EditorGUI.EndChangeCheck() && !Approximately(newTransformScale, avatarBone.localScale))
                             {
                                 Undo.RecordObject(avatarBone, "Change Bone Transform Scale");
@@ -932,12 +965,12 @@ namespace qsyi
                             var adjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
                             if (adjuster == null)
                             {
-                                EditorGUILayout.LabelField("ScaleAdjuster: なし");
+                                EditorGUILayout.LabelField("なし");
                             }
                             else
                             {
                                 EditorGUI.BeginChangeCheck();
-                                Vector3 newAdjusterScale = EditorGUILayout.Vector3Field("ScaleAdjuster", adjuster.Scale);
+                                Vector3 newAdjusterScale = EditorGUILayout.Vector3Field(GUIContent.none, adjuster.Scale);
                                 if (EditorGUI.EndChangeCheck() && !Approximately(newAdjusterScale, adjuster.Scale))
                                 {
                                     ApplyScaleAdjusterScale(adjuster, newAdjusterScale, true, "Change Bone ScaleAdjuster Scale");
@@ -953,6 +986,22 @@ namespace qsyi
 
                 EditorGUILayout.EndScrollView();
             }, GUILayout.ExpandHeight(true));
+        }
+
+        private Transform DrawBoneReferenceField(string label, string boneKey, Transform currentBone)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.Label(label, GUILayout.Width(95f));
+                var selectedBone = EditorGUILayout.ObjectField(currentBone, typeof(Transform), true) as Transform;
+                if (selectedBone != null && selectedBone != currentBone)
+                {
+                    _avatarBones[boneKey] = selectedBone;
+                    return selectedBone;
+                }
+
+                return currentBone;
+            }
         }
         
         private void DrawArmatureSettings()
@@ -1013,12 +1062,17 @@ namespace qsyi
                 if (!contextAvailable && _autoScaleSyncEnabled)
                     SetAutoScaleSyncEnabled(false);
 
-                bool previousSyncPositionAndRotation = _autoSyncPositionAndRotation;
-                _autoSyncPositionAndRotation = EditorGUILayout.ToggleLeft(
-                    "Position/Rotationも同期する(実験的機能)",
-                    _autoSyncPositionAndRotation);
+                bool previousSyncPosition = _autoSyncPosition;
+                bool previousSyncRotation = _autoSyncRotation;
+                _autoSyncPosition = EditorGUILayout.ToggleLeft(
+                    "Positionも同期する(実験的機能)",
+                    _autoSyncPosition);
+                _autoSyncRotation = EditorGUILayout.ToggleLeft(
+                    "Rotationも同期する(実験的機能)",
+                    _autoSyncRotation);
 
-                if (_autoScaleSyncEnabled && previousSyncPositionAndRotation != _autoSyncPositionAndRotation)
+                if (_autoScaleSyncEnabled &&
+                    (previousSyncPosition != _autoSyncPosition || previousSyncRotation != _autoSyncRotation))
                 {
                     _avatarScaleCache.Clear();
                     _nextAutoSyncTime = 0d;
@@ -1124,7 +1178,7 @@ namespace qsyi
                     adjusterScale);
 
                 if (!_avatarScaleCache.TryGetValue(boneName, out var cached) ||
-                    !AreSyncSnapshotsEqual(cached, snapshot, _autoSyncPositionAndRotation))
+                    !AreSyncSnapshotsEqual(cached, snapshot, _autoSyncPosition, _autoSyncRotation))
                 {
                     _avatarScaleCache[boneName] = snapshot;
                     changed = true;
@@ -1145,14 +1199,18 @@ namespace qsyi
         private static bool AreSyncSnapshotsEqual(
             (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale) a,
             (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale) b,
-            bool includePositionAndRotation)
+            bool includePosition,
+            bool includeRotation)
         {
             if (!Approximately(a.localScale, b.localScale))
                 return false;
-            if (includePositionAndRotation)
+            if (includePosition)
             {
                 if (!Approximately(a.localPosition, b.localPosition))
                     return false;
+            }
+            if (includeRotation)
+            {
                 if (!Approximately(a.localRotation, b.localRotation))
                     return false;
             }
@@ -1300,7 +1358,7 @@ namespace qsyi
                             hasAnyChange = true;
                         }
 
-                        if (_autoSyncPositionAndRotation)
+                        if (_autoSyncPosition)
                         {
                             if (!Approximately(outfitBone.localPosition, avatarLocalPosition))
                             {
@@ -1309,7 +1367,10 @@ namespace qsyi
                                 EditorUtility.SetDirty(outfitBone);
                                 hasAnyChange = true;
                             }
+                        }
 
+                        if (_autoSyncRotation)
+                        {
                             if (!Approximately(outfitBone.localRotation, avatarLocalRotation))
                             {
                                 Undo.RecordObject(outfitBone, "Auto Sync Transform Rotation");
@@ -1359,7 +1420,7 @@ namespace qsyi
                     ScanForCompose();
                     break;
                 case Mode.Scale: ScanBones(); break;
-                case Mode.MenuGenerator: break;
+                case Mode.MenuGenerator: ScanMenuMeshEntries(); break;
             }
         }
         
@@ -1371,6 +1432,7 @@ namespace qsyi
                 {
                     EditorGUILayout.LabelField("メニュー生成", EditorStyles.boldLabel);
                     _menuFolderName = EditorGUILayout.TextField(new GUIContent("フォルダ名", "生成先フォルダ名"), _menuFolderName);
+                    _menuPreviewEnabled = EditorGUILayout.ToggleLeft("プレビュー", _menuPreviewEnabled);
                     if (string.IsNullOrWhiteSpace(_menuFolderName))
                         EditorGUILayout.HelpBox("フォルダ名を入力してください。", MessageType.Warning);
                 });
@@ -1379,17 +1441,14 @@ namespace qsyi
                 {
                     EditorGUILayout.LabelField("生成対象", EditorStyles.boldLabel);
                     _menuRendererScroll = EditorGUILayout.BeginScrollView(_menuRendererScroll, GUILayout.ExpandHeight(true));
-                    DrawMenuRenderCards();
+                    DrawMenuMeshEntries();
                     EditorGUILayout.EndScrollView();
-
-                    if (GUILayout.Button("メニューを追加", GUILayout.Width(120f), GUILayout.Height(28f)))
-                        AddMenuRenderCard();
                 });
 
                 DrawMenuGenerateExecuteButton();
             }
 
-            SyncPreviewState();
+            SyncMenuPreviewState();
         }
 
         private void DrawMenuGenerateExecuteButton()
@@ -1410,8 +1469,8 @@ namespace qsyi
         private void GenerateMenu()
         {
             var parentTarget = FindMenuGenerationRoot();
-            var cardsToGenerate = GetGeneratableMenuRenderCards();
-            if (parentTarget == null || cardsToGenerate.Count == 0)
+            var entriesToGenerate = GetGeneratableMenuMeshEntries();
+            if (parentTarget == null || entriesToGenerate.Count == 0)
                 return;
 
             int undoGroup = Undo.GetCurrentGroup();
@@ -1424,20 +1483,22 @@ namespace qsyi
                 Undo.RegisterCreatedObjectUndo(folderObject, "Generate Menu");
                 folderObject.transform.SetParent(parentTarget.transform, false);
 
-                var menuItem = Undo.AddComponent<ModularAvatarMenuItem>(folderObject);
-                ConfigureFolderMenuItem(menuItem);
                 var generatedItemNames = new List<string>();
 
-                foreach (var card in cardsToGenerate)
+                foreach (var entry in entriesToGenerate)
                 {
-                    string itemName = GetMenuRenderCardName(card);
+                    string itemName = entry.Renderer.name;
                     CreateToggleObject(
                         folderObject.transform,
                         itemName,
-                        card.Entries.Select(entry => entry?.Renderer != null ? entry.Renderer.gameObject : null),
-                        card.Entries.Select(entry => entry != null && entry.ActiveWhenOn));
+                        new[] { entry.Renderer != null ? entry.Renderer.gameObject : null },
+                        new[] { false });
                     generatedItemNames.Add(itemName);
                 }
+
+                var menuItem = Undo.AddComponent<ModularAvatarMenuItem>(folderObject);
+                ConfigureFolderMenuItem(menuItem);
+                ForceRefreshGeneratedMenu(folderObject, menuItem);
 
                 EditorUtility.SetDirty(folderObject);
                 ScanData();
@@ -1492,7 +1553,10 @@ namespace qsyi
             menuItem.automaticValue = true;
             menuItem.label = string.Empty;
 
+            PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem.gameObject);
             EditorUtility.SetDirty(menuItem);
+            EditorUtility.SetDirty(menuItem.gameObject);
         }
 
         private void CreateToggleObject(Transform parent, string objectName, IEnumerable<GameObject> targetObjects, IEnumerable<bool> activeWhenOnValues)
@@ -1501,25 +1565,53 @@ namespace qsyi
             Undo.RegisterCreatedObjectUndo(toggleObject, "Generate Menu");
             toggleObject.transform.SetParent(parent, false);
 
+            var childMenuItem = Undo.AddComponent<ModularAvatarMenuItem>(toggleObject);
+            ConfigureChildMenuItem(childMenuItem);
+
             var itemToggler = Undo.AddComponent<ItemToggler>(toggleObject);
             ConfigureItemToggler(
                 itemToggler,
+                childMenuItem,
+                objectName,
                 targetObjects.Zip(activeWhenOnValues, (target, isOn) => (target, isOn))
                     .Where(pair => pair.target != null)
                     .Distinct()
                     .ToList());
+            PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem.gameObject);
+            EditorUtility.SetDirty(childMenuItem);
+            EditorUtility.SetDirty(childMenuItem.gameObject);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(toggleObject);
             EditorUtility.SetDirty(toggleObject);
         }
 
-        private void ConfigureItemToggler(ItemToggler itemToggler, IReadOnlyList<(GameObject target, bool activeWhenOn)> targetObjects)
+        private void ConfigureChildMenuItem(ModularAvatarMenuItem menuItem)
+        {
+            menuItem.PortableControl.Type = PortableControlType.Toggle;
+            menuItem.PortableControl.Value = 1f;
+            menuItem.PortableControl.Parameter = string.Empty;
+            menuItem.PortableControl.Icon = null;
+            menuItem.MenuSource = SubmenuSource.Children;
+            menuItem.isSynced = true;
+            menuItem.isSaved = true;
+            menuItem.isDefault = false;
+            menuItem.automaticValue = true;
+            menuItem.label = string.Empty;
+        }
+
+        private void ConfigureItemToggler(
+            ItemToggler itemToggler,
+            ModularAvatarMenuItem parentMenuItem,
+            string menuName,
+            IReadOnlyList<(GameObject target, bool activeWhenOn)> targetObjects)
         {
             var serializedObject = new SerializedObject(itemToggler);
             serializedObject.Update();
 
-            serializedObject.FindProperty("menuName").stringValue = string.Empty;
+            serializedObject.FindProperty("menuName").stringValue = menuName;
             serializedObject.FindProperty("parentOverride").objectReferenceValue = null;
             serializedObject.FindProperty("icon").objectReferenceValue = null;
-            serializedObject.FindProperty("parentOverrideMA").objectReferenceValue = null;
+            serializedObject.FindProperty("parentOverrideMA").objectReferenceValue = parentMenuItem;
             serializedObject.FindProperty("isSave").boolValue = true;
             serializedObject.FindProperty("isLocalOnly").boolValue = false;
             serializedObject.FindProperty("autoFixDuplicate").boolValue = true;
@@ -1540,8 +1632,70 @@ namespace qsyi
             parameterProperty.FindPropertyRelative("materialPropertyModifiers").arraySize = 0;
             parameterProperty.FindPropertyRelative("clips").arraySize = 0;
 
-            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            serializedObject.ApplyModifiedProperties();
+            PrefabUtility.RecordPrefabInstancePropertyModifications(itemToggler);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(itemToggler.gameObject);
             EditorUtility.SetDirty(itemToggler);
+            EditorUtility.SetDirty(itemToggler.gameObject);
+        }
+
+        private void ForceRefreshGeneratedMenu(GameObject folderObject, ModularAvatarMenuItem menuItem)
+        {
+            if (folderObject == null)
+                return;
+
+            var childTogglers = folderObject.GetComponentsInChildren<ItemToggler>(true);
+            var childMenuItems = folderObject.GetComponentsInChildren<ModularAvatarMenuItem>(true);
+            MarkGeneratedMenuDirty(folderObject, menuItem, childMenuItems, childTogglers);
+
+            EditorApplication.delayCall += () =>
+            {
+                if (folderObject == null)
+                    return;
+
+                var delayedMenuItem = menuItem != null
+                    ? menuItem
+                    : folderObject.GetComponent<ModularAvatarMenuItem>();
+                var delayedChildMenuItems = folderObject.GetComponentsInChildren<ModularAvatarMenuItem>(true);
+                var delayedChildTogglers = folderObject.GetComponentsInChildren<ItemToggler>(true);
+                MarkGeneratedMenuDirty(folderObject, delayedMenuItem, delayedChildMenuItems, delayedChildTogglers);
+            };
+        }
+
+        private void MarkGeneratedMenuDirty(
+            GameObject folderObject,
+            ModularAvatarMenuItem menuItem,
+            IEnumerable<ModularAvatarMenuItem> childMenuItems,
+            IEnumerable<ItemToggler> childTogglers)
+        {
+            if (folderObject == null)
+                return;
+
+            if (menuItem != null)
+            {
+                PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem);
+                EditorUtility.SetDirty(menuItem);
+            }
+
+            foreach (var childMenuItem in childMenuItems.Where(child => child != null))
+            {
+                PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem);
+                PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem.gameObject);
+                EditorUtility.SetDirty(childMenuItem);
+                EditorUtility.SetDirty(childMenuItem.gameObject);
+            }
+
+            foreach (var toggler in childTogglers.Where(toggler => toggler != null))
+            {
+                PrefabUtility.RecordPrefabInstancePropertyModifications(toggler);
+                PrefabUtility.RecordPrefabInstancePropertyModifications(toggler.gameObject);
+                EditorUtility.SetDirty(toggler);
+                EditorUtility.SetDirty(toggler.gameObject);
+            }
+
+            PrefabUtility.RecordPrefabInstancePropertyModifications(folderObject);
+            EditorUtility.SetDirty(folderObject);
+            EditorSceneManager.MarkSceneDirty(folderObject.scene);
         }
 
         private string BuildMenuGeneratedDialogMessage(string folderName, IReadOnlyList<string> generatedItemNames)
@@ -1752,247 +1906,138 @@ namespace qsyi
             GUI.backgroundColor = originalColor;
         }
 
-        private void DrawMenuRenderCards()
+        private void ScanMenuMeshEntries()
         {
-            EnsureAtLeastOneMenuRenderCard();
+            EnsureDefaultMenuFolderName();
 
-            if (_menuRenderCards.Count == 0)
+            var previousSettings = _menuMeshEntries
+                .Where(entry => entry != null && IsValidMenuRenderer(entry.Renderer))
+                .GroupBy(entry => entry.Renderer)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First().Include);
+
+            var scannedRenderers = _targets
+                .Where(IsValidTarget)
+                .SelectMany(target => target.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                .Where(IsValidMenuRenderer)
+                .Distinct()
+                .ToList();
+
+            var existingEntries = _menuMeshEntries
+                .Where(entry => entry != null)
+                .ToList();
+
+            foreach (var renderer in scannedRenderers)
             {
-                EditorGUILayout.HelpBox("メニューを追加して対象を設定してください。", MessageType.Info);
+                bool alreadyExists = existingEntries.Any(entry => entry.Renderer == renderer);
+                if (alreadyExists)
+                    continue;
+
+                bool include = previousSettings.TryGetValue(renderer, out var settings)
+                    ? settings
+                    : false;
+
+                existingEntries.Add(new MenuMeshEntry
+                {
+                    Renderer = renderer,
+                    Include = include
+                });
             }
 
-            for (int i = 0; i < _menuRenderCards.Count; i++)
-                DrawMenuRenderCard(i);
+            _menuMeshEntries = existingEntries;
         }
 
-        private void AddMenuRenderCard()
+        private void EnsureDefaultMenuFolderName()
         {
-            _menuRenderCards.Add(new MenuRenderCard
+            if (!string.IsNullOrWhiteSpace(_menuFolderName))
+                return;
+
+            var defaultTarget = _targets.FirstOrDefault(IsValidTarget);
+            if (defaultTarget != null)
+                _menuFolderName = defaultTarget.name;
+        }
+
+        private void DrawMenuMeshEntries()
+        {
+            if (_menuMeshEntries.Count == 0)
             {
-                Preview = false
-            });
+                EditorGUILayout.HelpBox("探索対象配下にメッシュが見つかりません。", MessageType.Info);
+                return;
+            }
+
+            _serializedObject.Update();
+            _menuMeshEntriesList.DoLayoutList();
+            _serializedObject.ApplyModifiedProperties();
         }
 
-        private void DrawMenuRenderCard(int index)
+        private void SyncMenuPreviewState()
         {
-            MenuRenderCard card = _menuRenderCards[index];
-
-            DrawColoredBox(BaseColor, () =>
+            if (_mode != Mode.MenuGenerator || !_menuPreviewEnabled)
             {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUILayout.LabelField($"メニュー{index + 1}", GUILayout.Width(56f));
-                    card.Name = EditorGUILayout.TextField(card.Name, GUILayout.Width(180f));
-                    GUILayout.FlexibleSpace();
+                RestoreMenuPreviewState();
+                return;
+            }
 
-                    bool previewValue = EditorGUILayout.Toggle(card.Preview, GUILayout.Width(16f));
-                    if (previewValue != card.Preview)
-                        SetPreviewCard(index, previewValue);
+            var previewTargets = new HashSet<GameObject>(
+                _menuMeshEntries
+                    .Where(entry => entry != null && entry.Include && IsValidMenuRenderer(entry.Renderer))
+                    .Select(entry => entry.Renderer.gameObject)
+                    .Where(target => target != null));
 
-                    EditorGUILayout.LabelField("プレビュー", GUILayout.Width(56f));
+            var toRestore = _menuPreviewOriginalStates.Keys
+                .Where(target => target == null || !previewTargets.Contains(target))
+                .ToList();
 
-                    if (GUILayout.Button("削除", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
-                    {
-                        RemoveMenuRenderCard(index);
-                        GUIUtility.ExitGUI();
-                    }
-                }
+            foreach (var target in toRestore)
+            {
+                if (target != null && _menuPreviewOriginalStates.TryGetValue(target, out var originalState))
+                    target.SetActive(originalState);
 
-                if (card.Entries.Count > 0)
-                    EditorGUILayout.Space(4f);
+                _menuPreviewOriginalStates.Remove(target);
+            }
 
-                for (int i = 0; i < card.Entries.Count; i++)
-                    DrawMenuRenderEntryRow(card, i);
+            foreach (var target in previewTargets)
+            {
+                if (!_menuPreviewOriginalStates.ContainsKey(target))
+                    _menuPreviewOriginalStates[target] = target.activeSelf;
 
-                EditorGUILayout.Space(4f);
-                DrawRendererDropArea(card, index);
-            });
+                if (target.activeSelf)
+                    target.SetActive(false);
+            }
         }
 
-        private void RemoveMenuRenderCard(int index)
+        private void RestoreMenuPreviewState()
         {
-            if (_previewCardIndex == index)
-                RestorePreviewStates();
-            else if (_previewCardIndex > index)
-                _previewCardIndex--;
+            foreach (var pair in _menuPreviewOriginalStates.ToList())
+            {
+                if (pair.Key != null)
+                    pair.Key.SetActive(pair.Value);
+            }
 
-            _menuRenderCards.RemoveAt(index);
-            EnsureAtLeastOneMenuRenderCard();
+            _menuPreviewOriginalStates.Clear();
         }
 
         private bool CanGenerateMenu()
         {
             return !string.IsNullOrWhiteSpace(_menuFolderName) &&
-                GetGeneratableMenuRenderCards().Count > 0;
+                GetGeneratableMenuMeshEntries().Count > 0;
         }
 
-        private List<MenuRenderCard> GetGeneratableMenuRenderCards()
+        private List<MenuMeshEntry> GetGeneratableMenuMeshEntries()
         {
-            return _menuRenderCards
-                .Where(card => card != null)
-                .Select(card =>
-                {
-                    card.Entries = card.Entries
-                        .Where(entry => entry != null && IsValidMenuRenderer(entry.Renderer))
-                        .GroupBy(entry => entry.Renderer)
-                        .Select(group => group.First())
-                        .ToList();
-                    return card;
-                })
-                .Where(card => card.Entries.Count > 0)
+            return _menuMeshEntries
+                .Where(entry => entry != null && entry.Include && IsValidMenuRenderer(entry.Renderer))
+                .GroupBy(entry => entry.Renderer)
+                .Select(group => group.First())
                 .ToList();
-        }
-
-        private string GetMenuRenderCardName(MenuRenderCard card)
-        {
-            if (!string.IsNullOrWhiteSpace(card.Name))
-                return card.Name.Trim();
-
-            return string.Join("/", card.Entries
-                .Where(entry => entry?.Renderer != null)
-                .Select(entry => entry.Renderer.name)
-                .Distinct());
-        }
-
-        private void EnsureAtLeastOneMenuRenderCard()
-        {
-            if (_menuRenderCards.Count > 0)
-                return;
-
-            _menuRenderCards.Add(new MenuRenderCard
-            {
-                Preview = false
-            });
-        }
-
-        private void DrawRendererDropArea(MenuRenderCard card, int cardIndex)
-        {
-            Rect dropArea = GUILayoutUtility.GetRect(0f, 30f, GUILayout.ExpandWidth(true));
-            GUI.Box(dropArea, "メッシュをここにドラッグ&ドロップ");
-
-            Event currentEvent = Event.current;
-            if (!dropArea.Contains(currentEvent.mousePosition))
-                return;
-
-            if (currentEvent.type != EventType.DragUpdated && currentEvent.type != EventType.DragPerform)
-                return;
-
-            var draggedRenderers = ExtractDraggedMenuRenderers(DragAndDrop.objectReferences);
-
-            if (draggedRenderers.Count == 0)
-                return;
-
-            DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
-
-            if (currentEvent.type == EventType.DragPerform)
-            {
-                DragAndDrop.AcceptDrag();
-
-                var existing = new HashSet<SkinnedMeshRenderer>(
-                    card.Entries.Where(entry => entry?.Renderer != null).Select(entry => entry.Renderer));
-
-                foreach (var renderer in draggedRenderers)
-                {
-                    if (existing.Contains(renderer))
-                        continue;
-
-                    card.Entries.Add(new MenuRenderEntry
-                    {
-                        Renderer = renderer,
-                        ActiveWhenOn = false
-                    });
-                    AutoFillMenuRenderCardName(card, renderer);
-                    existing.Add(renderer);
-                }
-
-                GUI.changed = true;
-            }
-
-            currentEvent.Use();
-        }
-
-        private List<SkinnedMeshRenderer> ExtractDraggedMenuRenderers(Object[] draggedObjects)
-        {
-            var renderers = new List<SkinnedMeshRenderer>();
-            if (draggedObjects == null)
-                return renderers;
-
-            foreach (var draggedObject in draggedObjects)
-            {
-                var renderer = ResolveDraggedMenuRenderer(draggedObject);
-                if (renderer != null && !renderers.Contains(renderer))
-                    renderers.Add(renderer);
-            }
-
-            return renderers;
-        }
-
-        private SkinnedMeshRenderer ResolveDraggedMenuRenderer(Object draggedObject)
-        {
-            if (draggedObject == null)
-                return null;
-
-            if (draggedObject is SkinnedMeshRenderer skinnedMeshRenderer)
-                return IsValidMenuRenderer(skinnedMeshRenderer) ? skinnedMeshRenderer : null;
-
-            if (draggedObject is GameObject gameObject)
-            {
-                var rendererFromGameObject = gameObject.GetComponent<SkinnedMeshRenderer>();
-                return IsValidMenuRenderer(rendererFromGameObject) ? rendererFromGameObject : null;
-            }
-
-            if (draggedObject is Component component)
-            {
-                var rendererFromComponent = component.GetComponent<SkinnedMeshRenderer>();
-                return IsValidMenuRenderer(rendererFromComponent) ? rendererFromComponent : null;
-            }
-
-            return null;
-        }
-
-        private void DrawMenuRenderEntryRow(MenuRenderCard card, int index)
-        {
-            MenuRenderEntry entry = card.Entries[index];
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                int popupIndex = entry.ActiveWhenOn ? 0 : 1;
-                int newPopupIndex = EditorGUILayout.Popup(popupIndex, new[] { "ON", "OFF" }, GUILayout.Width(52f));
-                entry.ActiveWhenOn = newPopupIndex == 0;
-
-                EditorGUI.BeginChangeCheck();
-                var newRenderer = (SkinnedMeshRenderer)EditorGUILayout.ObjectField(
-                    entry.Renderer,
-                    typeof(SkinnedMeshRenderer),
-                    true);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    entry.Renderer = IsValidMenuRenderer(newRenderer) ? newRenderer : null;
-                    AutoFillMenuRenderCardName(card, entry.Renderer);
-                }
-
-                if (GUILayout.Button("削除", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
-                {
-                    bool shouldReapplyPreview = _previewCardIndex >= 0 &&
-                        _previewCardIndex < _menuRenderCards.Count &&
-                        ReferenceEquals(_menuRenderCards[_previewCardIndex], card);
-
-                    if (shouldReapplyPreview)
-                        RestorePreviewStates();
-
-                    card.Entries.RemoveAt(index);
-
-                    if (shouldReapplyPreview)
-                        ApplyPreviewState(_previewCardIndex);
-
-                    GUIUtility.ExitGUI();
-                }
-            }
         }
 
         private bool IsValidMenuRenderer(SkinnedMeshRenderer renderer)
         {
-            return renderer != null && renderer.sharedMesh != null;
+            return renderer != null &&
+                renderer.sharedMesh != null &&
+                IsValidTarget(renderer.gameObject);
         }
 
         private string GetMenuGenerateWarningMessage()
@@ -2000,89 +2045,7 @@ namespace qsyi
             if (string.IsNullOrWhiteSpace(_menuFolderName))
                 return "フォルダ名を入力してください。";
 
-            return "メニューを生成するには対象を含むカードを 1 つ以上追加してください。";
-        }
-
-        private void AutoFillMenuRenderCardName(MenuRenderCard card, SkinnedMeshRenderer renderer)
-        {
-            if (card == null || renderer == null || !string.IsNullOrWhiteSpace(card.Name))
-                return;
-
-            card.Name = renderer.name;
-        }
-
-        private void SetPreviewCard(int index, bool enabled)
-        {
-            for (int i = 0; i < _menuRenderCards.Count; i++)
-                _menuRenderCards[i].Preview = enabled && i == index;
-        }
-
-        private void SyncPreviewState()
-        {
-            int newPreviewIndex = _menuRenderCards.FindIndex(card => card != null && card.Preview);
-            if (newPreviewIndex == _previewCardIndex)
-            {
-                if (newPreviewIndex >= 0)
-                    ReapplyPreviewState();
-                return;
-            }
-
-            RestorePreviewStates();
-            if (newPreviewIndex >= 0)
-                ApplyPreviewState(newPreviewIndex);
-        }
-
-        private void ApplyPreviewState(int cardIndex)
-        {
-            if (cardIndex < 0 || cardIndex >= _menuRenderCards.Count)
-                return;
-
-            var card = _menuRenderCards[cardIndex];
-            if (card == null)
-                return;
-
-            _previewOriginalStates.Clear();
-            foreach (var entry in card.Entries.Where(entry => entry?.Renderer != null))
-            {
-                var target = entry.Renderer.gameObject;
-                if (!_previewOriginalStates.ContainsKey(target))
-                    _previewOriginalStates[target] = target.activeSelf;
-
-                target.SetActive(entry.ActiveWhenOn);
-            }
-
-            _previewCardIndex = cardIndex;
-        }
-
-        private void ReapplyPreviewState()
-        {
-            if (_previewCardIndex < 0 || _previewCardIndex >= _menuRenderCards.Count)
-                return;
-
-            var card = _menuRenderCards[_previewCardIndex];
-            if (card == null)
-                return;
-
-            foreach (var entry in card.Entries.Where(entry => entry?.Renderer != null))
-            {
-                var target = entry.Renderer.gameObject;
-                if (!_previewOriginalStates.ContainsKey(target))
-                    _previewOriginalStates[target] = target.activeSelf;
-
-                target.SetActive(entry.ActiveWhenOn);
-            }
-        }
-
-        private void RestorePreviewStates()
-        {
-            foreach (var pair in _previewOriginalStates)
-            {
-                if (pair.Key != null)
-                    pair.Key.SetActive(pair.Value);
-            }
-
-            _previewOriginalStates.Clear();
-            _previewCardIndex = -1;
+            return "メニューを生成するには、含めるメッシュを 1 つ以上チェックしてください。";
         }
 
         private bool IsValidTarget(GameObject target) => target != null && !target.CompareTag("EditorOnly");

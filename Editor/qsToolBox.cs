@@ -1496,6 +1496,8 @@ namespace qsyi
                     generatedItemNames.Add(itemName);
                 }
 
+                var menuInstaller = Undo.AddComponent<ModularAvatarMenuInstaller>(folderObject);
+                ConfigureMenuInstaller(menuInstaller);
                 var menuItem = Undo.AddComponent<ModularAvatarMenuItem>(folderObject);
                 ConfigureFolderMenuItem(menuItem);
                 ForceRefreshGeneratedMenu(folderObject, menuItem);
@@ -1557,6 +1559,17 @@ namespace qsyi
             PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem.gameObject);
             EditorUtility.SetDirty(menuItem);
             EditorUtility.SetDirty(menuItem.gameObject);
+        }
+
+        private void ConfigureMenuInstaller(ModularAvatarMenuInstaller menuInstaller)
+        {
+            menuInstaller.menuToAppend = null;
+            menuInstaller.installTargetMenu = null;
+
+            PrefabUtility.RecordPrefabInstancePropertyModifications(menuInstaller);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(menuInstaller.gameObject);
+            EditorUtility.SetDirty(menuInstaller);
+            EditorUtility.SetDirty(menuInstaller.gameObject);
         }
 
         private void CreateToggleObject(Transform parent, string objectName, IEnumerable<GameObject> targetObjects, IEnumerable<bool> activeWhenOnValues)

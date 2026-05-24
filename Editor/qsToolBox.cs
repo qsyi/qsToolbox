@@ -2093,17 +2093,30 @@ namespace qsyi
         private Transform FindChildByKeyword(Transform parent, string keyword)
         {
             if (parent == null) return null;
-            
+
             string normalizedKeyword = NormalizeBoneToken(keyword);
+            Transform bestMatch = null;
+            int bestExtra = int.MaxValue;
+
             for (int i = 0; i < parent.childCount; i++)
             {
                 var child = parent.GetChild(i);
                 string normalizedName = NormalizeBoneToken(child.name);
 
-                if (normalizedName.Contains(normalizedKeyword))
+                if (normalizedName == normalizedKeyword)
                     return child;
+
+                if (normalizedName.Contains(normalizedKeyword))
+                {
+                    int extra = normalizedName.Length - normalizedKeyword.Length;
+                    if (extra < bestExtra)
+                    {
+                        bestExtra = extra;
+                        bestMatch = child;
+                    }
+                }
             }
-            return null;
+            return bestMatch;
         }
 
         private static string NormalizeBoneToken(string source)

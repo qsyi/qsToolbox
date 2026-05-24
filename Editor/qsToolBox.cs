@@ -17,11 +17,9 @@ namespace qsyi
     {
         private enum Mode { Material, BlendShape, Scale, MenuGenerator }
         
-        // Core Fields
         [SerializeField] private List<GameObject> _targets = new List<GameObject>();
         [SerializeField] private Transform _avatarArmature;
         [SerializeField] private List<OutfitArmatureEntry> _outfitArmatureEntries = new List<OutfitArmatureEntry>();
-        [SerializeField] private bool _autoScaleSyncEnabled;
         [SerializeField] private bool _autoSyncPosition;
         [SerializeField] private bool _autoSyncRotation;
         [SerializeField] private bool _menuPreviewEnabled = true;
@@ -34,13 +32,11 @@ namespace qsyi
         private Vector2 _scaleStatusScroll;
         private Vector2 _menuRendererScroll;
         
-        // Data Cache
         private readonly List<SkinnedMeshRenderer> _skinnedMeshRenderers = new List<SkinnedMeshRenderer>();
         private readonly List<Material> _materials = new List<Material>();
         private readonly Dictionary<Material, List<(Renderer renderer, int slot)>> _materialUsage = new Dictionary<Material, List<(Renderer, int)>>();
         private readonly Dictionary<GameObject, Dictionary<string, Transform>> _outfitBones = new Dictionary<GameObject, Dictionary<string, Transform>>();
         private readonly Dictionary<string, Transform> _avatarBones = new Dictionary<string, Transform>();
-        // Compose Mode
         private SkinnedMeshRenderer _composeTarget;
         private string _baseShapeName = "";
         private readonly List<(string name, float weight)> _composeShapes = new List<(string, float)>();
@@ -50,7 +46,6 @@ namespace qsyi
         private bool _overwriteShape = true;
         private string _menuFolderName = "";
         
-        // Cache Control
         private SerializedObject _serializedObject;
         private SerializedProperty _targetsProperty;
         private SerializedProperty _armatureProperty;
@@ -59,15 +54,10 @@ namespace qsyi
         private ReorderableList _menuMeshEntriesList;
         private int _targetHash = -1;
         private bool _isDirty = true;
-        private bool _isApplyingAutoSync;
-        private double _nextAutoSyncTime;
         private readonly Dictionary<GameObject, bool> _menuPreviewOriginalStates = new Dictionary<GameObject, bool>();
-        private readonly Dictionary<string, (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale)> _avatarScaleCache
-            = new Dictionary<string, (Vector3, Vector3, Quaternion, bool, Vector3)>();
         private static FieldInfo _adjustChildPositionsField;
         private static bool _adjustChildPositionsResolved;
         
-        // Constants
         private const float BUTTON_WIDTH_SMALL = 20f;
         private const float BUTTON_WIDTH_MEDIUM = 60f;
         private const float BUTTON_WIDTH_LARGE = 80f;
@@ -76,19 +66,18 @@ namespace qsyi
         private const float VIEW_WIDTH_RATIO = 0.5f;
         private const double AUTO_SYNC_INTERVAL_SECONDS = 0.2d;
         
-        // UI Colors
         private static readonly Color HeaderColor = new Color(0.6f, 0.8f, 1f, 0.8f);
         private static readonly Color ContentColor = new Color(0.7f, 0.7f, 0.7f, 0.6f);
         private static readonly Color SelectColor = new Color(0.5f, 0.7f, 1f, 0.8f);
         private static readonly Color TargetColor = new Color(0.9f, 0.9f, 0.6f, 0.8f);
         private static readonly Color BaseColor = new Color(0.8f, 1f, 0.8f, 0.8f);
         
-        private static readonly string[] TAB_NAMES = { "マテリアル", "ブレンドシェイプ", "スケール", "メニュー生成" };
+        private static readonly string[] TAB_NAMES = { "マテリアル", "ブレンドシェイプ", "スケール", "簡易メニュー生成" };
         private static readonly GUIContent[] TAB_TOOLTIPS = {
             new GUIContent("マテリアル", "探索対象のマテリアルを置換できます"),
             new GUIContent("ブレンドシェイプ", "探索対象のブレンドシェイプを表示・編集します"),
             new GUIContent("スケール", "ModularAvatarのスケール調整機能を使用します"),
-            new GUIContent("メニュー生成", "メニュー生成機能の追加予定エリアです")
+            new GUIContent("簡易メニュー生成", "簡易メニュー生成機能の追加予定エリアです")
         };
         private static readonly string[] BONE_ORDER = {
             "Hips", "Spine", "Chest", "Breast L", "Breast R", "Neck", "Head", 
@@ -139,20 +128,14 @@ namespace qsyi
             InitializeSerializedObject();
             EditorApplication.hierarchyChanged += OnHierarchyChanged;
             Undo.postprocessModifications += OnUndo;
-            EditorApplication.update += OnEditorUpdate;
             ScanData();
         }
-        
+
         private void OnDisable()
         {
-            if (_autoScaleSyncEnabled)
-                SetAutoScaleSyncEnabled(false);
-
             RestoreMenuPreviewState();
-
             EditorApplication.hierarchyChanged -= OnHierarchyChanged;
             Undo.postprocessModifications -= OnUndo;
-            EditorApplication.update -= OnEditorUpdate;
         }
         
         private void InitializeSerializedObject()
@@ -257,10 +240,8 @@ namespace qsyi
         private void DrawMainTabs()
         {
             EditorGUILayout.Space(4);
-            DrawTabButtons(TAB_NAMES, TAB_TOOLTIPS, (int)_mode, (index) => 
+            DrawTabButtons(TAB_NAMES, TAB_TOOLTIPS, (int)_mode, (index) =>
             {
-                if (_autoScaleSyncEnabled && _mode != (Mode)index)
-                    SetAutoScaleSyncEnabled(false);
                 if (_mode == Mode.MenuGenerator && _mode != (Mode)index)
                     RestoreMenuPreviewState();
 
@@ -671,8 +652,7 @@ namespace qsyi
             }
             else
             {
-                mesh.ClearBlendShapes();  // 追加
-                // 既存のブレンドシェイプを再追加
+                mesh.ClearBlendShapes();
                 for (int i = 0; i < originalMesh.blendShapeCount; i++)
                 {
                     CopyExistingBlendShape(originalMesh, mesh, i, originalMesh.GetBlendShapeName(i));
@@ -719,8 +699,9 @@ namespace qsyi
             var deltaVertices = new Vector3[vertices.Length];
             var deltaNormals = new Vector3[normals.Length];
             var deltaTangents = new Vector3[tangents.Length];
-            
-            mesh.GetBlendShapeFrameVertices(baseIndex, 0, deltaVertices, deltaNormals, deltaTangents);
+
+            int lastFrame = mesh.GetBlendShapeFrameCount(baseIndex) - 1;
+            mesh.GetBlendShapeFrameVertices(baseIndex, lastFrame, deltaVertices, deltaNormals, deltaTangents);
             
             for (int i = 0; i < vertices.Length; i++)
             {
@@ -732,6 +713,8 @@ namespace qsyi
         
         private void ApplyComposeShapeDeltas(Mesh mesh, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
         {
+            if (_composeShapes.Count == 0) return;
+
             float progress = 0.2f;
             float step = 0.6f / _composeShapes.Count;
             
@@ -754,8 +737,9 @@ namespace qsyi
             var deltaVertices = new Vector3[vertices.Length];
             var deltaNormals = new Vector3[normals.Length];
             var deltaTangents = new Vector3[tangents.Length];
-            
-            mesh.GetBlendShapeFrameVertices(index, 0, deltaVertices, deltaNormals, deltaTangents);
+
+            int lastFrame = mesh.GetBlendShapeFrameCount(index) - 1;
+            mesh.GetBlendShapeFrameVertices(index, lastFrame, deltaVertices, deltaNormals, deltaTangents);
             
             float multiplier = weight / 100f;
             for (int i = 0; i < vertices.Length; i++)
@@ -793,17 +777,16 @@ namespace qsyi
                 normals = mesh.normals,
                 tangents = mesh.tangents,
                 uv = mesh.uv,
-                uv2 = mesh.uv2,  // 追加
-                uv3 = mesh.uv3,  // 追加
-                uv4 = mesh.uv4,  // 追加
-                colors = mesh.colors,  // 追加
-                boneWeights = mesh.boneWeights,  // 追加
-                bindposes = mesh.bindposes,  // 追加
-                bounds = mesh.bounds,  // 追加：これが重要
+                uv2 = mesh.uv2,
+                uv3 = mesh.uv3,
+                uv4 = mesh.uv4,
+                colors = mesh.colors,
+                boneWeights = mesh.boneWeights,
+                bindposes = mesh.bindposes,
+                bounds = mesh.bounds,
                 name = mesh.name
             };
             
-            // サブメッシュ情報もコピー（追加）
             tempMesh.subMeshCount = mesh.subMeshCount;
             for (int i = 0; i < mesh.subMeshCount; i++)
             {
@@ -828,13 +811,17 @@ namespace qsyi
         
         private void CopyExistingBlendShape(Mesh originalMesh, Mesh targetMesh, int shapeIndex, string shapeName)
         {
-            var vertices = originalMesh.vertices;
-            var deltaVertices = new Vector3[vertices.Length];
-            var deltaNormals = new Vector3[vertices.Length];
-            var deltaTangents = new Vector3[vertices.Length];
-            
-            originalMesh.GetBlendShapeFrameVertices(shapeIndex, 0, deltaVertices, deltaNormals, deltaTangents);
-            targetMesh.AddBlendShapeFrame(shapeName, 100f, deltaVertices, deltaNormals, deltaTangents);
+            int vertexCount = originalMesh.vertexCount;
+            int frameCount = originalMesh.GetBlendShapeFrameCount(shapeIndex);
+            for (int f = 0; f < frameCount; f++)
+            {
+                var deltaVertices = new Vector3[vertexCount];
+                var deltaNormals = new Vector3[vertexCount];
+                var deltaTangents = new Vector3[vertexCount];
+                float frameWeight = originalMesh.GetBlendShapeFrameWeight(shapeIndex, f);
+                originalMesh.GetBlendShapeFrameVertices(shapeIndex, f, deltaVertices, deltaNormals, deltaTangents);
+                targetMesh.AddBlendShapeFrame(shapeName, frameWeight, deltaVertices, deltaNormals, deltaTangents);
+            }
         }
         
         private string SaveMeshAsset(Mesh mesh, string shapeName)
@@ -845,14 +832,15 @@ namespace qsyi
                 Directory.CreateDirectory(saveDirectory);
                 AssetDatabase.Refresh();
             }
-            
-            string fileName = $"{mesh.name}_{shapeName}.asset";
+
+            string timestamp = System.DateTime.Now.ToString("yy_MMdd_HHmmss");
+            string fileName = $"{timestamp}.asset";
             string filePath = Path.Combine(saveDirectory, fileName);
-            
+
             int counter = 1;
             while (File.Exists(filePath))
             {
-                fileName = $"{mesh.name}_{shapeName}_{counter++}.asset";
+                fileName = $"{timestamp}_{counter++}.asset";
                 filePath = Path.Combine(saveDirectory, fileName);
             }
             
@@ -877,7 +865,6 @@ namespace qsyi
         {
             using (new EditorGUILayout.VerticalScope(GUILayout.ExpandHeight(true)))
             {
-                // アーマーチュア設定は常に表示
                 DrawArmatureSettings();
                 
                 bool hasOutfitBones = _outfitBones.Count > 0;
@@ -952,7 +939,13 @@ namespace qsyi
                         {
                             EditorGUILayout.LabelField(boneName, EditorStyles.boldLabel);
 
-                            avatarBone = DrawBoneReferenceField("Transform", boneName, avatarBone);
+                            using (new EditorGUILayout.HorizontalScope())
+                            {
+                                GUILayout.Label("Transform", GUILayout.Width(95f));
+                                GUI.enabled = false;
+                                EditorGUILayout.ObjectField(avatarBone, typeof(Transform), true);
+                                GUI.enabled = true;
+                            }
                             EditorGUI.BeginChangeCheck();
                             Vector3 newTransformScale = EditorGUILayout.Vector3Field(GUIContent.none, avatarBone.localScale);
                             if (EditorGUI.EndChangeCheck() && !Approximately(newTransformScale, avatarBone.localScale))
@@ -988,22 +981,6 @@ namespace qsyi
             }, GUILayout.ExpandHeight(true));
         }
 
-        private Transform DrawBoneReferenceField(string label, string boneKey, Transform currentBone)
-        {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                GUILayout.Label(label, GUILayout.Width(95f));
-                var selectedBone = EditorGUILayout.ObjectField(currentBone, typeof(Transform), true) as Transform;
-                if (selectedBone != null && selectedBone != currentBone)
-                {
-                    _avatarBones[boneKey] = selectedBone;
-                    return selectedBone;
-                }
-
-                return currentBone;
-            }
-        }
-        
         private void DrawArmatureSettings()
         {
             DrawColoredBox(HeaderColor, () => 
@@ -1058,169 +1035,22 @@ namespace qsyi
         {
             DrawColoredBox(SelectColor, () =>
             {
-                bool contextAvailable = IsAutoSyncContextAvailable(out var contextMessage);
-                if (!contextAvailable && _autoScaleSyncEnabled)
-                    SetAutoScaleSyncEnabled(false);
+                _autoSyncPosition = EditorGUILayout.ToggleLeft("Positionも同期する(実験的機能)", _autoSyncPosition);
+                _autoSyncRotation = EditorGUILayout.ToggleLeft("Rotationも同期する(実験的機能)", _autoSyncRotation);
 
-                bool previousSyncPosition = _autoSyncPosition;
-                bool previousSyncRotation = _autoSyncRotation;
-                _autoSyncPosition = EditorGUILayout.ToggleLeft(
-                    "Positionも同期する(実験的機能)",
-                    _autoSyncPosition);
-                _autoSyncRotation = EditorGUILayout.ToggleLeft(
-                    "Rotationも同期する(実験的機能)",
-                    _autoSyncRotation);
-
-                if (_autoScaleSyncEnabled &&
-                    (previousSyncPosition != _autoSyncPosition || previousSyncRotation != _autoSyncRotation))
+                GUI.enabled = canSync && !EditorApplication.isPlaying;
+                if (GUILayout.Button("同期", GUILayout.Height(EXECUTE_BUTTON_HEIGHT)))
                 {
-                    _avatarScaleCache.Clear();
-                    _nextAutoSyncTime = 0d;
+                    ScanBones();
                     ApplyAvatarScalesToOutfits();
                 }
-
-                bool previousEnabled = _autoScaleSyncEnabled;
-                GUI.enabled = canSync && contextAvailable;
-                string buttonLabel = _autoScaleSyncEnabled ? "同期終了" : "同期開始";
-                bool newEnabled = GUILayout.Toggle(_autoScaleSyncEnabled, buttonLabel, "Button", GUILayout.Height(EXECUTE_BUTTON_HEIGHT));
                 GUI.enabled = true;
-
-                if (newEnabled != previousEnabled)
-                {
-                    SetAutoScaleSyncEnabled(newEnabled);
-                }
-
-                if (canSync && contextAvailable)
-                    EditorGUILayout.HelpBox("同期中は常にスケール等の変更を反映します。", MessageType.Info);
 
                 if (!canSync)
                     EditorGUILayout.HelpBox("素体と衣装の両方にボーンが必要です。", MessageType.Info);
-                else if (!contextAvailable)
-                    EditorGUILayout.HelpBox(contextMessage, MessageType.Info);
             });
         }
         
-        private void OnEditorUpdate()
-        {
-            if (!_autoScaleSyncEnabled || _isApplyingAutoSync)
-                return;
-
-            if (!IsAutoSyncContextAvailable(out _))
-            {
-                SetAutoScaleSyncEnabled(false);
-                return;
-            }
-
-            if (EditorApplication.timeSinceStartup < _nextAutoSyncTime)
-                return;
-
-            _nextAutoSyncTime = EditorApplication.timeSinceStartup + AUTO_SYNC_INTERVAL_SECONDS;
-
-            if (_isDirty || _avatarBones.Count == 0 || _outfitBones.Count == 0)
-                ScanBones();
-
-            if (!HasAvatarSyncSourceChanges())
-                return;
-
-            ApplyAvatarScalesToOutfits();
-        }
-
-        private void SetAutoScaleSyncEnabled(bool enabled)
-        {
-            _autoScaleSyncEnabled = enabled;
-            _avatarScaleCache.Clear();
-            _nextAutoSyncTime = 0d;
-
-            if (_autoScaleSyncEnabled)
-            {
-                ScanBones();
-                ApplyAvatarScalesToOutfits();
-            }
-        }
-
-        private bool IsAutoSyncContextAvailable(out string message)
-        {
-            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isPlaying)
-            {
-                message = "Play中は同期を停止します。";
-                return false;
-            }
-
-            if (PrefabStageUtility.GetCurrentPrefabStage() != null)
-            {
-                message = "Prefab編集中は同期を停止します。";
-                return false;
-            }
-
-            message = string.Empty;
-            return true;
-        }
-
-        private bool HasAvatarSyncSourceChanges()
-        {
-            bool changed = false;
-            var seen = new HashSet<string>();
-
-            foreach (var boneName in BONE_ORDER)
-            {
-                if (!_avatarBones.TryGetValue(boneName, out var avatarBone) || avatarBone == null)
-                    continue;
-
-                seen.Add(boneName);
-                var adjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
-                bool hasAdjuster = adjuster != null;
-                Vector3 adjusterScale = hasAdjuster ? adjuster.Scale : Vector3.zero;
-                var snapshot = (
-                    avatarBone.localScale,
-                    avatarBone.localPosition,
-                    avatarBone.localRotation,
-                    hasAdjuster,
-                    adjusterScale);
-
-                if (!_avatarScaleCache.TryGetValue(boneName, out var cached) ||
-                    !AreSyncSnapshotsEqual(cached, snapshot, _autoSyncPosition, _autoSyncRotation))
-                {
-                    _avatarScaleCache[boneName] = snapshot;
-                    changed = true;
-                }
-            }
-
-            var removed = _avatarScaleCache.Keys.Where(k => !seen.Contains(k)).ToList();
-            if (removed.Count > 0)
-            {
-                foreach (var key in removed)
-                    _avatarScaleCache.Remove(key);
-                changed = true;
-            }
-
-            return changed;
-        }
-
-        private static bool AreSyncSnapshotsEqual(
-            (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale) a,
-            (Vector3 localScale, Vector3 localPosition, Quaternion localRotation, bool hasAdjuster, Vector3 adjusterScale) b,
-            bool includePosition,
-            bool includeRotation)
-        {
-            if (!Approximately(a.localScale, b.localScale))
-                return false;
-            if (includePosition)
-            {
-                if (!Approximately(a.localPosition, b.localPosition))
-                    return false;
-            }
-            if (includeRotation)
-            {
-                if (!Approximately(a.localRotation, b.localRotation))
-                    return false;
-            }
-            if (a.hasAdjuster != b.hasAdjuster)
-                return false;
-            if (a.hasAdjuster && !Approximately(a.adjusterScale, b.adjusterScale))
-                return false;
-            return true;
-        }
-
         private static bool Approximately(Vector3 a, Vector3 b)
         {
             return Mathf.Approximately(a.x, b.x) &&
@@ -1325,13 +1155,12 @@ namespace qsyi
             if (_avatarBones.Count == 0 || _outfitBones.Count == 0)
                 return;
 
-            _isApplyingAutoSync = true;
+            Undo.SetCurrentGroupName("Sync Bones");
+            int undoGroup = Undo.GetCurrentGroup();
+            bool hasAnyChange = false;
+
             try
             {
-                Undo.SetCurrentGroupName("Auto Sync Bones");
-                int undoGroup = Undo.GetCurrentGroup();
-                bool hasAnyChange = false;
-
                 foreach (var boneName in BONE_ORDER)
                 {
                     if (!_avatarBones.TryGetValue(boneName, out var avatarBone) || avatarBone == null)
@@ -1404,9 +1233,9 @@ namespace qsyi
                 if (hasAnyChange)
                     Undo.CollapseUndoOperations(undoGroup);
             }
-            finally
+            catch (System.Exception e)
             {
-                _isApplyingAutoSync = false;
+                Debug.LogError($"[qsToolBox] Sync error: {e}");
             }
         }
         
@@ -1430,7 +1259,7 @@ namespace qsyi
             {
                 DrawColoredBox(HeaderColor, () =>
                 {
-                    EditorGUILayout.LabelField("メニュー生成", EditorStyles.boldLabel);
+                    EditorGUILayout.LabelField("簡易メニュー生成", EditorStyles.boldLabel);
                     _menuFolderName = EditorGUILayout.TextField(new GUIContent("フォルダ名", "生成先フォルダ名"), _menuFolderName);
                     _menuPreviewEnabled = EditorGUILayout.ToggleLeft("プレビュー", _menuPreviewEnabled);
                     if (string.IsNullOrWhiteSpace(_menuFolderName))
@@ -1505,7 +1334,7 @@ namespace qsyi
                 EditorUtility.SetDirty(folderObject);
                 ScanData();
                 EditorUtility.DisplayDialog(
-                    "メニュー生成",
+                    "簡易メニュー生成",
                     BuildMenuGeneratedDialogMessage(folderName, generatedItemNames),
                     "OK");
                 Debug.Log($"[qsToolBox] Generated menu '{folderObject.name}' with {generatedItemNames.Count} item(s).");

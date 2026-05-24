@@ -4,7 +4,8 @@
     "references": [
         "nadena.dev.modular-avatar.core",
         "nadena.dev.modular-avatar.core.editor",
-        "jp.lilxyzw.lilycalinventory.runtime"
+        "jp.lilxyzw.lilycalinventory.runtime",
+        "com.anatawa12.avatar-optimizer.runtime"
     ],
     "includePlatforms": [
         "Editor"

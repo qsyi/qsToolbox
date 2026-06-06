@@ -27,6 +27,7 @@ namespace qsyi
         
         private Mode _mode = Mode.Material;
         private Vector2 _scrollPosition;
+        private Vector2 _targetScroll;
         private Vector2 _composeShapeScroll;
         private Vector2 _shapeListScroll;
         private Vector2 _scaleStatusScroll;
@@ -57,35 +58,37 @@ namespace qsyi
         private readonly Dictionary<GameObject, bool> _menuPreviewOriginalStates = new Dictionary<GameObject, bool>();
         private static FieldInfo _adjustChildPositionsField;
         private static bool _adjustChildPositionsResolved;
+        private static GUIStyle _tabLeft, _tabMid, _tabRight, _tabScan;
+        private static GUIStyle _tabLeftSel, _tabMidSel, _tabRightSel;
+        private static GUIStyle _dimBoneStyle;
         
         private const float BUTTON_WIDTH_SMALL = 20f;
         private const float BUTTON_WIDTH_MEDIUM = 60f;
         private const float BUTTON_WIDTH_LARGE = 80f;
         private const float SCROLL_HEIGHT = 300f;
-        private const float EXECUTE_BUTTON_HEIGHT = 30f;
+        private const float EXECUTE_BUTTON_HEIGHT = 40f;
         private const float VIEW_WIDTH_RATIO = 0.5f;
-        private const double AUTO_SYNC_INTERVAL_SECONDS = 0.2d;
+
+        private static Color HeaderColor  => EditorGUIUtility.isProSkin ? new Color(0.26f, 0.28f, 0.32f, 1f) : new Color(0.80f, 0.86f, 0.93f, 1f);
+        private static Color ContentColor => EditorGUIUtility.isProSkin ? new Color(0.22f, 0.22f, 0.23f, 1f) : new Color(0.86f, 0.86f, 0.87f, 1f);
+        private static Color SelectColor  => EditorGUIUtility.isProSkin ? new Color(0.21f, 0.30f, 0.43f, 1f) : new Color(0.74f, 0.87f, 0.99f, 1f);
+        private static Color TargetColor  => EditorGUIUtility.isProSkin ? new Color(0.28f, 0.26f, 0.20f, 1f) : new Color(0.96f, 0.93f, 0.82f, 1f);
+        private static Color BaseColor    => EditorGUIUtility.isProSkin ? new Color(0.22f, 0.26f, 0.23f, 1f) : new Color(0.85f, 0.92f, 0.86f, 1f);
+        private static Color AccentColor  => new Color(0.30f, 0.60f, 1.00f, 1f);
         
-        private static readonly Color HeaderColor = new Color(0.6f, 0.8f, 1f, 0.8f);
-        private static readonly Color ContentColor = new Color(0.7f, 0.7f, 0.7f, 0.6f);
-        private static readonly Color SelectColor = new Color(0.5f, 0.7f, 1f, 0.8f);
-        private static readonly Color TargetColor = new Color(0.9f, 0.9f, 0.6f, 0.8f);
-        private static readonly Color BaseColor = new Color(0.8f, 1f, 0.8f, 0.8f);
-        
-        private static readonly string[] TAB_NAMES = { "マテリアル", "ブレンドシェイプ", "スケール", "簡易メニュー生成" };
+        private static readonly string[] TAB_NAMES = { "マテリアル", "ブレンドシェイプ", "スケール", "メニュー生成" };
         private static readonly GUIContent[] TAB_TOOLTIPS = {
             new GUIContent("マテリアル", "探索対象のマテリアルを置換できます"),
             new GUIContent("ブレンドシェイプ", "探索対象のブレンドシェイプを表示・編集します"),
             new GUIContent("スケール", "ModularAvatarのスケール調整機能を使用します"),
-            new GUIContent("簡易メニュー生成", "簡易メニュー生成機能の追加予定エリアです")
+            new GUIContent("メニュー生成", "lilycalInventory用の簡易メニューを生成します")
         };
         private static readonly string[] BONE_ORDER = {
-            "Hips", "Spine", "Chest", "Breast L", "Breast R", "Neck", "Head", 
-            "Butt L", "Butt R", "Upper Leg L", "Upper Leg R", "Lower Leg L", "Lower Leg R", 
-            "Foot L", "Foot R", "Shoulder L", "Shoulder R", "Upper Arm L", "Upper Arm R", 
+            "Hips", "Spine", "Chest", "Breast L", "Breast R", "Neck", "Head",
+            "Butt L", "Butt R", "Upper Leg L", "Upper Leg R", "Lower Leg L", "Lower Leg R",
+            "Foot L", "Foot R", "Shoulder L", "Shoulder R", "Upper Arm L", "Upper Arm R",
             "Lower Arm L", "Lower Arm R", "Hand L", "Hand R"
         };
-        
         private static readonly Dictionary<string, string> BONE_PARENT = new Dictionary<string, string>
         {
             ["Spine"] = "Hips", ["Chest"] = "Spine", ["Neck"] = "Chest", ["Head"] = "Neck",
@@ -99,6 +102,9 @@ namespace qsyi
             ["Hand L"] = "Lower Arm L", ["Hand R"] = "Lower Arm R",
             ["Breast L"] = "Chest", ["Breast R"] = "Chest"
         };
+        
+[SerializeField] private bool _targetsFoldout = true;
+        private readonly Dictionary<Material, bool> _materialFoldouts = new Dictionary<Material, bool>();
 
         [System.Serializable]
         private class OutfitArmatureEntry
@@ -127,7 +133,6 @@ namespace qsyi
         {
             InitializeSerializedObject();
             EditorApplication.hierarchyChanged += OnHierarchyChanged;
-            Undo.postprocessModifications += OnUndo;
             ScanData();
         }
 
@@ -135,7 +140,6 @@ namespace qsyi
         {
             RestoreMenuPreviewState();
             EditorApplication.hierarchyChanged -= OnHierarchyChanged;
-            Undo.postprocessModifications -= OnUndo;
         }
         
         private void InitializeSerializedObject()
@@ -152,7 +156,7 @@ namespace qsyi
 
         private void InitializeMenuMeshEntriesList()
         {
-            _menuMeshEntriesList = new ReorderableList(_serializedObject, _menuMeshEntriesProperty, true, true, true, true);
+            _menuMeshEntriesList = new ReorderableList(_serializedObject, _menuMeshEntriesProperty, false, true, true, true);
             _menuMeshEntriesList.drawHeaderCallback = rect =>
             {
                 EditorGUI.LabelField(rect, "生成対象");
@@ -183,11 +187,6 @@ namespace qsyi
         }
         
         private void OnHierarchyChanged() => _isDirty = true;
-        private UndoPropertyModification[] OnUndo(UndoPropertyModification[] modifications)
-        {
-            _isDirty = true;
-            return modifications;
-        }
         
         private void OnGUI()
         {
@@ -211,14 +210,30 @@ namespace qsyi
         
         private void CheckForTargetChanges()
         {
-            DrawColoredBox(TargetColor, () => 
+            DrawColoredBox(TargetColor, () =>
             {
                 _serializedObject.Update();
-                EditorGUI.BeginChangeCheck();
-                EditorGUILayout.PropertyField(_targetsProperty, new GUIContent("探索対象（自動）", "スキャン対象を指定"), true);
-                bool changed = EditorGUI.EndChangeCheck();
+
+                int validCount = _targets.Count(t => t != null);
+                string summary = validCount > 0 ? $"  ({validCount} 件)" : "";
+                EditorGUILayout.BeginHorizontal();
+                _targetsFoldout = EditorGUILayout.Foldout(_targetsFoldout, $"探索対象{summary}", true, EditorStyles.foldoutHeader);
+                EditorGUILayout.EndHorizontal();
+
+                bool changed = false;
+                if (_targetsFoldout)
+                {
+                    EditorGUI.BeginChangeCheck();
+                    float propHeight = EditorGUI.GetPropertyHeight(_targetsProperty, GUIContent.none, true);
+                    float scrollHeight = Mathf.Min(propHeight, 120f);
+                    _targetScroll = EditorGUILayout.BeginScrollView(_targetScroll, GUILayout.Height(scrollHeight));
+                    EditorGUILayout.PropertyField(_targetsProperty, GUIContent.none, true);
+                    EditorGUILayout.EndScrollView();
+                    changed = EditorGUI.EndChangeCheck();
+                }
+
                 _serializedObject.ApplyModifiedProperties();
-                
+
                 int currentHash = GetTargetHash();
                 if (changed || _isDirty || currentHash != _targetHash)
                 {
@@ -232,13 +247,15 @@ namespace qsyi
         private int GetTargetHash()
         {
             int hash = _targets.Count;
-            foreach (var target in _targets.Where(t => t != null))
-                hash = hash * 31 + target.GetInstanceID();
+            foreach (var target in _targets)
+                if (target != null)
+                    hash = hash * 31 + target.GetInstanceID();
             return hash;
         }
         
         private void DrawMainTabs()
         {
+            DrawSeparator();
             EditorGUILayout.Space(4);
             DrawTabButtons(TAB_NAMES, TAB_TOOLTIPS, (int)_mode, (index) =>
             {
@@ -254,36 +271,55 @@ namespace qsyi
         
         private void DrawTabButtons(string[] tabNames, GUIContent[] tooltips, int selectedIndex, System.Action<int> onTabSelected, bool showScanButton)
         {
-            var originalColor = GUI.backgroundColor;
-            EditorGUILayout.BeginHorizontal();
-            
-            float totalWidth = EditorGUIUtility.currentViewWidth - (showScanButton ? 60 : 10);
+            const float tabHeight = 28f;
+            const float accentH   = 3f;
+
+            if (_tabLeft == null)
+            {
+                _tabLeft    = new GUIStyle(EditorStyles.miniButtonLeft)  { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Normal };
+                _tabMid     = new GUIStyle(EditorStyles.miniButtonMid)   { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Normal };
+                _tabRight   = new GUIStyle(EditorStyles.miniButtonRight) { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Normal };
+                _tabLeftSel  = new GUIStyle(EditorStyles.miniButtonLeft)  { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Bold };
+                _tabMidSel   = new GUIStyle(EditorStyles.miniButtonMid)   { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Bold };
+                _tabRightSel = new GUIStyle(EditorStyles.miniButtonRight) { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Bold };
+                _tabScan    = new GUIStyle(EditorStyles.miniButton) { fixedHeight = tabHeight, fontSize = 14 };
+            }
+
+            var originalBg = GUI.backgroundColor;
+            float totalWidth = EditorGUIUtility.currentViewWidth - (showScanButton ? 64f : 8f);
             float buttonWidth = totalWidth / tabNames.Length;
-            
+
+            EditorGUILayout.BeginHorizontal();
             for (int i = 0; i < tabNames.Length; i++)
             {
                 bool isSelected = selectedIndex == i;
-                GUI.backgroundColor = isSelected ? new Color(0.8f, 0.85f, 1f) : originalColor;
-                
-                var buttonStyle = GetButtonStyle(i, tabNames.Length);
-                
-                if (GUILayout.Button(tooltips[i], buttonStyle, GUILayout.Width(buttonWidth)) && !isSelected)
-                {
+                bool isLast = i == tabNames.Length - 1;
+                GUI.backgroundColor = isSelected ? new Color(0.82f, 0.88f, 1f) : originalBg;
+
+                GUIStyle style = isSelected
+                    ? (i == 0 ? _tabLeftSel : isLast ? _tabRightSel : _tabMidSel)
+                    : (i == 0 ? _tabLeft    : isLast ? _tabRight    : _tabMid);
+
+                if (GUILayout.Button(tooltips[i], style, GUILayout.Width(buttonWidth)) && !isSelected)
                     onTabSelected(i);
+
+                if (isSelected && Event.current.type == EventType.Repaint)
+                {
+                    var r = GUILayoutUtility.GetLastRect();
+                    EditorGUI.DrawRect(new Rect(r.x, r.yMax - accentH, r.width, accentH), AccentColor);
                 }
             }
-            
-            GUI.backgroundColor = originalColor;
-            
+
+            GUI.backgroundColor = originalBg;
+
             if (showScanButton)
             {
-                if (GUILayout.Button(new GUIContent("スキャン", "再スキャン"), EditorStyles.miniButton, GUILayout.Width(50)))
+                if (GUILayout.Button(new GUIContent("↺", "再スキャン"), _tabScan, GUILayout.Width(54f)))
                 {
                     ScanData();
                     Repaint();
                 }
             }
-            
             EditorGUILayout.EndHorizontal();
         }
         
@@ -312,14 +348,53 @@ namespace qsyi
             
             foreach (var material in _materials)
             {
-                DrawColoredBox(ContentColor, () => 
+                EditorGUILayout.BeginHorizontal();
+
+                var preview = AssetPreview.GetAssetPreview(material);
+                if (preview == null)
                 {
-                    EditorGUI.BeginChangeCheck();
-                    var newMaterial = (Material)EditorGUILayout.ObjectField(material, typeof(Material), false);
-                    
-                    if (EditorGUI.EndChangeCheck() && newMaterial != null && newMaterial != material)
-                        ReplaceMaterial(material, newMaterial);
-                });
+                    Repaint();
+                    preview = AssetPreview.GetMiniThumbnail(material);
+                }
+                if (preview != null)
+                    GUILayout.Label(preview, GUILayout.Width(48f), GUILayout.Height(48f));
+
+                EditorGUILayout.BeginVertical();
+
+                EditorGUI.BeginChangeCheck();
+                var newMaterial = (Material)EditorGUILayout.ObjectField(material, typeof(Material), false);
+                if (EditorGUI.EndChangeCheck() && newMaterial != null && newMaterial != material)
+                    ReplaceMaterial(material, newMaterial);
+
+                if (_materialUsage.TryGetValue(material, out var usages))
+                {
+                    if (!_materialFoldouts.ContainsKey(material))
+                        _materialFoldouts[material] = false;
+
+                    _materialFoldouts[material] = EditorGUILayout.Foldout(
+                        _materialFoldouts[material],
+                        $"使用箇所  {usages.Count} 件",
+                        true,
+                        EditorStyles.foldout);
+
+                    if (_materialFoldouts[material])
+                    {
+                        EditorGUI.indentLevel++;
+                        foreach (var (renderer, _) in usages)
+                        {
+                            if (renderer == null) continue;
+                            GUI.enabled = false;
+                            EditorGUILayout.ObjectField(renderer, typeof(Renderer), true);
+                            GUI.enabled = true;
+                        }
+                        EditorGUI.indentLevel--;
+                    }
+                }
+
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.EndHorizontal();
+
+                DrawSeparator();
             }
             
             EditorGUILayout.EndScrollView();
@@ -329,11 +404,10 @@ namespace qsyi
         {
             using (new EditorGUILayout.VerticalScope())
             {
-                float upperContentHeight = position.height - 190f;
+                float executeAreaHeight = CanExecuteCompose() ? 60f : 100f;
+                float upperContentHeight = Mathf.Max(80f, position.height - 120f - executeAreaHeight);
                 _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition, GUILayout.Height(upperContentHeight));
-                
-                ScanForCompose();
-                
+
                 DrawComposeTargetSelection();
                 DrawBaseShapeSelection();
                 DrawComposeShapeAndListSelection();
@@ -378,14 +452,20 @@ namespace qsyi
         {
             if (string.IsNullOrEmpty(_baseShapeName))
             {
-                EditorGUILayout.LabelField("下の一覧から「ベース」ボタンを押して選択");
+                EditorGUILayout.HelpBox("右の一覧から「ベース」を押して選択してください。", MessageType.Info);
             }
             else
             {
-                using (new EditorGUILayout.HorizontalScope())
+                var nameStyle = new GUIStyle(EditorStyles.boldLabel)
                 {
-                    EditorGUILayout.LabelField("選択中: " + _baseShapeName);
-                    if (GUILayout.Button("クリア", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
+                    fontSize = 13,
+                    alignment = TextAnchor.MiddleLeft,
+                };
+                using (new EditorGUILayout.HorizontalScope(GUILayout.Height(32f)))
+                {
+                    EditorGUILayout.LabelField("✓", nameStyle, GUILayout.Width(18f));
+                    EditorGUILayout.LabelField(new GUIContent(_baseShapeName, _baseShapeName), nameStyle);
+                    if (GUILayout.Button("クリア", EditorStyles.miniButton, GUILayout.Width(BUTTON_WIDTH_MEDIUM), GUILayout.Height(32f)))
                     {
                         _baseShapeName = "";
                         if (_overwriteShape)
@@ -426,6 +506,11 @@ namespace qsyi
             using (new EditorGUILayout.HorizontalScope())
             {
                 DrawComposeShapeSelection();
+
+                var lineRect = GUILayoutUtility.GetRect(1f, 1f, GUILayout.ExpandHeight(true), GUILayout.Width(1f));
+                if (Event.current.type == EventType.Repaint)
+                    EditorGUI.DrawRect(lineRect, EditorGUIUtility.isProSkin ? new Color(0.13f, 0.13f, 0.13f) : new Color(0.60f, 0.60f, 0.60f));
+
                 DrawShapeSelectionList();
             }
         }
@@ -454,19 +539,20 @@ namespace qsyi
         
         private void DrawComposeShapeList()
         {
-            for (int i = _composeShapes.Count - 1; i >= 0; i--)
+            for (int i = 0; i < _composeShapes.Count; i++)
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     if (GUILayout.Button("×", GUILayout.Width(BUTTON_WIDTH_SMALL)))
                     {
                         _composeShapes.RemoveAt(i);
+                        i--;
                         continue;
                     }
                     
                     var item = _composeShapes[i];
-                    EditorGUILayout.LabelField(item.name, GUILayout.Width(120));
-                    
+                    EditorGUILayout.LabelField(new GUIContent(item.name, item.name), GUILayout.Width(120));
+
                     float weight = EditorGUILayout.Slider(item.weight, -100f, 100f);
                     if (!Mathf.Approximately(weight, item.weight))
                         _composeShapes[i] = (item.name, weight);
@@ -482,7 +568,12 @@ namespace qsyi
                 {
                     EditorGUILayout.LabelField("シェイプキー一覧", EditorStyles.boldLabel);
                     
-                    _composeSearchText = EditorGUILayout.TextField("検索", _composeSearchText);
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        _composeSearchText = EditorGUILayout.TextField("検索", _composeSearchText);
+                        if (!string.IsNullOrEmpty(_composeSearchText) && GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(20f)))
+                            _composeSearchText = "";
+                    }
                     EditorGUILayout.Space(5);
                     
                     _shapeListScroll = EditorGUILayout.BeginScrollView(_shapeListScroll, GUILayout.Height(SCROLL_HEIGHT));
@@ -518,14 +609,16 @@ namespace qsyi
         private void DrawBaseShapeSelectionButton(string shapeName)
         {
             bool isBase = shapeName == _baseShapeName;
-            GUI.enabled = !isBase;
-            if (GUILayout.Button(isBase ? "ベース中" : "ベース", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
+            var prevBg = GUI.backgroundColor;
+            if (isBase)
+                GUI.backgroundColor = new Color(0.30f, 0.75f, 0.35f);
+            if (GUILayout.Button(isBase ? "✓ ベース" : "ベース", GUILayout.Width(BUTTON_WIDTH_MEDIUM)) && !isBase)
             {
                 _baseShapeName = shapeName;
                 if (_overwriteShape)
                     _newShapeName = shapeName;
             }
-            GUI.enabled = true;
+            GUI.backgroundColor = prevBg;
         }
         
         private void DrawAddShapeButton(string shapeName)
@@ -538,19 +631,24 @@ namespace qsyi
         
         private void DrawComposeExecuteButton()
         {
-            DrawColoredBox(HeaderColor, () => 
+            DrawColoredBox(HeaderColor, () =>
             {
+                bool canCompose = CanExecuteCompose();
+                if (!canCompose)
+                {
+                    string reason = _composeTarget?.sharedMesh == null ? "対象メッシュを選択してください。"
+                        : string.IsNullOrEmpty(_baseShapeName)         ? "ベースシェイプキーを選択してください。"
+                        :                                                 "出力名を入力してください。";
+                    EditorGUILayout.HelpBox(reason, MessageType.Info);
+                }
+
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     if (GUILayout.Button("全クリア", GUILayout.Height(EXECUTE_BUTTON_HEIGHT), GUILayout.Width(BUTTON_WIDTH_LARGE)))
-                    {
                         ResetComposeData();
-                    }
-                    
+
                     GUILayout.FlexibleSpace();
-                    
-                    bool canCompose = CanExecuteCompose();
-                    
+
                     GUI.enabled = canCompose;
                     if (GUILayout.Button("合成実行", GUILayout.Height(EXECUTE_BUTTON_HEIGHT), GUILayout.Width(BUTTON_WIDTH_LARGE)))
                         ExecuteShapeCompose();
@@ -561,7 +659,8 @@ namespace qsyi
         
         private bool CanExecuteCompose()
         {
-            return !string.IsNullOrEmpty(_baseShapeName) && 
+            return _composeTarget?.sharedMesh != null &&
+                   !string.IsNullOrEmpty(_baseShapeName) &&
                    (_overwriteShape || !string.IsNullOrEmpty(_newShapeName));
         }
         
@@ -768,48 +867,21 @@ namespace qsyi
             return (deltaVertices, deltaNormals, deltaTangents);
         }
         
-        private Mesh CreateMeshWithReplacedShape(Mesh mesh, Mesh originalMesh, string targetName, (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) deltas)
+        private static Mesh CreateMeshWithReplacedShape(Mesh mesh, Mesh originalMesh, string targetName, (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) deltas)
         {
-            var tempMesh = new Mesh
-            {
-                vertices = mesh.vertices,
-                triangles = mesh.triangles,
-                normals = mesh.normals,
-                tangents = mesh.tangents,
-                uv = mesh.uv,
-                uv2 = mesh.uv2,
-                uv3 = mesh.uv3,
-                uv4 = mesh.uv4,
-                colors = mesh.colors,
-                boneWeights = mesh.boneWeights,
-                bindposes = mesh.bindposes,
-                bounds = mesh.bounds,
-                name = mesh.name
-            };
-            
-            tempMesh.subMeshCount = mesh.subMeshCount;
-            for (int i = 0; i < mesh.subMeshCount; i++)
-            {
-                tempMesh.SetSubMesh(i, mesh.GetSubMesh(i));
-            }
-            
+            mesh.ClearBlendShapes();
             for (int i = 0; i < originalMesh.blendShapeCount; i++)
             {
                 string shapeName = originalMesh.GetBlendShapeName(i);
                 if (shapeName == targetName)
-                {
-                    tempMesh.AddBlendShapeFrame(shapeName, 100f, deltas.vertices, deltas.normals, deltas.tangents);
-                }
+                    mesh.AddBlendShapeFrame(shapeName, 100f, deltas.vertices, deltas.normals, deltas.tangents);
                 else
-                {
-                    CopyExistingBlendShape(originalMesh, tempMesh, i, shapeName);
-                }
+                    CopyExistingBlendShape(originalMesh, mesh, i, shapeName);
             }
-            
-            return tempMesh;
+            return mesh;
         }
         
-        private void CopyExistingBlendShape(Mesh originalMesh, Mesh targetMesh, int shapeIndex, string shapeName)
+        private static void CopyExistingBlendShape(Mesh originalMesh, Mesh targetMesh, int shapeIndex, string shapeName)
         {
             int vertexCount = originalMesh.vertexCount;
             int frameCount = originalMesh.GetBlendShapeFrameCount(shapeIndex);
@@ -872,7 +944,7 @@ namespace qsyi
                 
                 DrawColoredBox(HeaderColor, () => 
                 {
-                    bool isValidTarget = _targets.All(t => t?.GetComponent<ModularAvatarMeshSettings>() != null);
+                    bool isValidTarget = _targets.Count > 0 && _targets.All(t => t?.GetComponent<ModularAvatarMeshSettings>() != null);
                     if (!isValidTarget)
                     {
                         EditorGUILayout.HelpBox("SetupOutfitした衣装を入れてください。", MessageType.Error);
@@ -890,7 +962,9 @@ namespace qsyi
                 });
 
                 DrawBoneDetectionWarnings();
+                DrawSeparator();
                 DrawAvatarScaleStatusList();
+                DrawSeparator();
                 DrawAutoScaleSyncControls(hasAvatarBones && hasOutfitBones);
             }
         }
@@ -899,28 +973,19 @@ namespace qsyi
         {
             var missingAvatarBones = BONE_ORDER.Where(b => !_avatarBones.ContainsKey(b)).ToList();
             if (missingAvatarBones.Count > 0)
-            {
-                EditorGUILayout.HelpBox(
-                    $"素体で未検出のボーンがあります ({missingAvatarBones.Count}/{BONE_ORDER.Length})\n{string.Join(", ", missingAvatarBones)}",
-                    MessageType.Warning);
-            }
+                EditorGUILayout.HelpBox($"素体: {missingAvatarBones.Count} 件未検出 — {string.Join(", ", missingAvatarBones)}", MessageType.Warning);
 
-            var outfits = _targets.Where(t => t != null).ToList();
-            foreach (var outfit in outfits)
+            foreach (var outfit in _targets.Where(t => t != null))
             {
                 if (!_outfitBones.TryGetValue(outfit, out var boneMap))
                 {
-                    EditorGUILayout.HelpBox($"「{outfit.name}」のボーンを検出できませんでした。", MessageType.Warning);
+                    EditorGUILayout.HelpBox($"「{outfit.name}」: ボーンを検出できませんでした。", MessageType.Warning);
                     continue;
                 }
 
-                var missingOutfitBones = BONE_ORDER.Where(b => !boneMap.ContainsKey(b)).ToList();
-                if (missingOutfitBones.Count > 0)
-                {
-                    EditorGUILayout.HelpBox(
-                        $"「{outfit.name}」で未検出のボーンがあります ({missingOutfitBones.Count}/{BONE_ORDER.Length})\n{string.Join(", ", missingOutfitBones)}",
-                        MessageType.Warning);
-                }
+                var missing = BONE_ORDER.Where(b => !boneMap.ContainsKey(b)).ToList();
+                if (missing.Count > 0)
+                    EditorGUILayout.HelpBox($"「{outfit.name}」: {missing.Count} 件未検出 — {string.Join(", ", missing)}", MessageType.Warning);
             }
         }
 
@@ -931,54 +996,64 @@ namespace qsyi
                 EditorGUILayout.LabelField("素体ボーンスケール", EditorStyles.boldLabel);
                 _scaleStatusScroll = EditorGUILayout.BeginScrollView(_scaleStatusScroll, GUILayout.ExpandHeight(true));
 
-                foreach (var boneName in BONE_ORDER)
+                foreach (var boneName in BONE_ORDER.Where(b => _avatarBones.ContainsKey(b) && _avatarBones[b] != null))
+                    DrawBoneEntry(boneName);
+
+                var undetected = BONE_ORDER.Where(b => !_avatarBones.ContainsKey(b) || _avatarBones[b] == null).ToList();
+                if (undetected.Count > 0)
                 {
-                    DrawColoredBox(BaseColor, () =>
-                    {
-                        if (_avatarBones.TryGetValue(boneName, out var avatarBone) && avatarBone != null)
-                        {
-                            EditorGUILayout.LabelField(boneName, EditorStyles.boldLabel);
-
-                            using (new EditorGUILayout.HorizontalScope())
-                            {
-                                GUILayout.Label("Transform", GUILayout.Width(95f));
-                                GUI.enabled = false;
-                                EditorGUILayout.ObjectField(avatarBone, typeof(Transform), true);
-                                GUI.enabled = true;
-                            }
-                            EditorGUI.BeginChangeCheck();
-                            Vector3 newTransformScale = EditorGUILayout.Vector3Field(GUIContent.none, avatarBone.localScale);
-                            if (EditorGUI.EndChangeCheck() && !Approximately(newTransformScale, avatarBone.localScale))
-                            {
-                                Undo.RecordObject(avatarBone, "Change Bone Transform Scale");
-                                avatarBone.localScale = newTransformScale;
-                                EditorUtility.SetDirty(avatarBone);
-                            }
-
-                            var adjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
-                            if (adjuster == null)
-                            {
-                                EditorGUILayout.LabelField("なし");
-                            }
-                            else
-                            {
-                                EditorGUI.BeginChangeCheck();
-                                Vector3 newAdjusterScale = EditorGUILayout.Vector3Field(GUIContent.none, adjuster.Scale);
-                                if (EditorGUI.EndChangeCheck() && !Approximately(newAdjusterScale, adjuster.Scale))
-                                {
-                                    ApplyScaleAdjusterScale(adjuster, newAdjusterScale, true, "Change Bone ScaleAdjuster Scale");
-                                }
-                            }
-                        }
-                        else
-                        {
-                            EditorGUILayout.LabelField($"{boneName}: 未検出");
-                        }
-                    });
+                    DrawSeparator(padding: 2f);
+                    foreach (var boneName in undetected)
+                        DrawBoneEntry(boneName);
                 }
 
                 EditorGUILayout.EndScrollView();
             }, GUILayout.ExpandHeight(true));
+        }
+
+        private void DrawBoneEntry(string boneName)
+        {
+            if (_avatarBones.TryGetValue(boneName, out var avatarBone) && avatarBone != null)
+            {
+                EditorGUILayout.LabelField(boneName, EditorStyles.boldLabel);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.Label("Transform", GUILayout.Width(80f));
+                    GUI.enabled = false;
+                    EditorGUILayout.ObjectField(avatarBone, typeof(Transform), true);
+                    GUI.enabled = true;
+                }
+
+                EditorGUI.BeginChangeCheck();
+                var newScale = EditorGUILayout.Vector3Field("Scale", avatarBone.localScale);
+                if (EditorGUI.EndChangeCheck() && !Approximately(newScale, avatarBone.localScale))
+                {
+                    Undo.RecordObject(avatarBone, "Change Bone Transform Scale");
+                    avatarBone.localScale = newScale;
+                    EditorUtility.SetDirty(avatarBone);
+                }
+
+                var adjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
+                if (adjuster != null)
+                {
+                    EditorGUI.BeginChangeCheck();
+                    var newAdjScale = EditorGUILayout.Vector3Field("ScaleAdjuster", adjuster.Scale);
+                    if (EditorGUI.EndChangeCheck() && !Approximately(newAdjScale, adjuster.Scale))
+                        ApplyScaleAdjusterScale(adjuster, newAdjScale, true, "Change Bone ScaleAdjuster Scale");
+                }
+
+                DrawSeparator(padding: 2f);
+            }
+            else
+            {
+                if (_dimBoneStyle == null)
+                    _dimBoneStyle = new GUIStyle(EditorStyles.miniLabel)
+                    {
+                        normal = { textColor = EditorGUIUtility.isProSkin ? new Color(0.45f, 0.45f, 0.45f) : new Color(0.6f, 0.6f, 0.6f) }
+                    };
+                EditorGUILayout.LabelField($"− {boneName}", _dimBoneStyle);
+            }
         }
 
         private void DrawArmatureSettings()
@@ -1004,8 +1079,8 @@ namespace qsyi
                 if (changed)
                     ScanBones();
             });
-            
-            EditorGUILayout.Space(5);
+
+            DrawSeparator();
         }
 
         private void DrawOutfitArmatureSettings()
@@ -1035,8 +1110,11 @@ namespace qsyi
         {
             DrawColoredBox(SelectColor, () =>
             {
-                _autoSyncPosition = EditorGUILayout.ToggleLeft("Positionも同期する(実験的機能)", _autoSyncPosition);
-                _autoSyncRotation = EditorGUILayout.ToggleLeft("Rotationも同期する(実験的機能)", _autoSyncRotation);
+                _autoSyncPosition = EditorGUILayout.ToggleLeft("Position も同期する（実験的機能）", _autoSyncPosition);
+                _autoSyncRotation = EditorGUILayout.ToggleLeft("Rotation も同期する（実験的機能）", _autoSyncRotation);
+
+                if (!canSync)
+                    EditorGUILayout.HelpBox("素体と衣装の両方にボーンが必要です。", MessageType.Info);
 
                 GUI.enabled = canSync && !EditorApplication.isPlaying;
                 if (GUILayout.Button("同期", GUILayout.Height(EXECUTE_BUTTON_HEIGHT)))
@@ -1045,9 +1123,6 @@ namespace qsyi
                     ApplyAvatarScalesToOutfits();
                 }
                 GUI.enabled = true;
-
-                if (!canSync)
-                    EditorGUILayout.HelpBox("素体と衣装の両方にボーンが必要です。", MessageType.Info);
             });
         }
         
@@ -1285,13 +1360,13 @@ namespace qsyi
             DrawColoredBox(SelectColor, () =>
             {
                 bool canGenerate = CanGenerateMenu();
+                if (!canGenerate)
+                    EditorGUILayout.HelpBox(GetMenuGenerateWarningMessage(), MessageType.Info);
+
                 GUI.enabled = canGenerate;
                 if (GUILayout.Button("生成", GUILayout.Height(EXECUTE_BUTTON_HEIGHT)))
                     GenerateMenu();
                 GUI.enabled = true;
-
-                if (!canGenerate && !string.IsNullOrWhiteSpace(_menuFolderName))
-                    EditorGUILayout.HelpBox(GetMenuGenerateWarningMessage(), MessageType.Warning);
             });
         }
 
@@ -1371,9 +1446,9 @@ namespace qsyi
             return baseName.StartsWith("Menu_") ? baseName : $"Menu_{baseName}";
         }
 
-        private void ConfigureFolderMenuItem(ModularAvatarMenuItem menuItem)
+        private static void ApplyMenuItemDefaults(ModularAvatarMenuItem menuItem, PortableControlType type)
         {
-            menuItem.PortableControl.Type = PortableControlType.SubMenu;
+            menuItem.PortableControl.Type = type;
             menuItem.PortableControl.Value = 1f;
             menuItem.PortableControl.Parameter = string.Empty;
             menuItem.PortableControl.Icon = null;
@@ -1383,7 +1458,11 @@ namespace qsyi
             menuItem.isDefault = false;
             menuItem.automaticValue = true;
             menuItem.label = string.Empty;
+        }
 
+        private void ConfigureFolderMenuItem(ModularAvatarMenuItem menuItem)
+        {
+            ApplyMenuItemDefaults(menuItem, PortableControlType.SubMenu);
             PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem);
             PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem.gameObject);
             EditorUtility.SetDirty(menuItem);
@@ -1427,18 +1506,9 @@ namespace qsyi
             EditorUtility.SetDirty(toggleObject);
         }
 
-        private void ConfigureChildMenuItem(ModularAvatarMenuItem menuItem)
+        private static void ConfigureChildMenuItem(ModularAvatarMenuItem menuItem)
         {
-            menuItem.PortableControl.Type = PortableControlType.Toggle;
-            menuItem.PortableControl.Value = 1f;
-            menuItem.PortableControl.Parameter = string.Empty;
-            menuItem.PortableControl.Icon = null;
-            menuItem.MenuSource = SubmenuSource.Children;
-            menuItem.isSynced = true;
-            menuItem.isSaved = true;
-            menuItem.isDefault = false;
-            menuItem.automaticValue = true;
-            menuItem.label = string.Empty;
+            ApplyMenuItemDefaults(menuItem, PortableControlType.Toggle);
         }
 
         private void ConfigureItemToggler(
@@ -1569,7 +1639,7 @@ namespace qsyi
         {
             _materials.Clear();
             _materialUsage.Clear();
-            
+
             foreach (var gameObject in _targets.Where(IsValidTarget))
             {
                 foreach (var renderer in gameObject.GetComponentsInChildren<Renderer>(true))
@@ -1577,6 +1647,9 @@ namespace qsyi
                     ProcessRendererMaterials(renderer);
                 }
             }
+
+            foreach (var key in _materialFoldouts.Keys.Where(k => !_materials.Contains(k)).ToList())
+                _materialFoldouts.Remove(key);
         }
         
         private void ProcessRendererMaterials(Renderer renderer)
@@ -1736,16 +1809,21 @@ namespace qsyi
                    _composeTarget.sharedMesh?.blendShapeCount == 0;
         }
         
-        private void DrawColoredBox(Color color, System.Action content, params GUILayoutOption[] options)
+        private static void DrawColoredBox(Color _, System.Action content, params GUILayoutOption[] options)
         {
-            var originalColor = GUI.backgroundColor;
-            GUI.backgroundColor = color;
-            using (new EditorGUILayout.VerticalScope("box", options))
+            EditorGUILayout.BeginVertical(options);
+            content();
+            EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawSeparator(float thickness = 1f, float padding = 3f)
+        {
+            var rect = GUILayoutUtility.GetRect(0f, padding * 2f + thickness, GUILayout.ExpandWidth(true));
+            if (Event.current.type == EventType.Repaint)
             {
-                GUI.backgroundColor = originalColor;
-                content();
+                var line = new Rect(rect.x, rect.y + padding, rect.width, thickness);
+                EditorGUI.DrawRect(line, EditorGUIUtility.isProSkin ? new Color(0.13f, 0.13f, 0.13f) : new Color(0.60f, 0.60f, 0.60f));
             }
-            GUI.backgroundColor = originalColor;
         }
 
         private void ScanMenuMeshEntries()
@@ -1770,6 +1848,8 @@ namespace qsyi
                 .Where(entry => entry != null)
                 .ToList();
 
+            existingEntries.RemoveAll(e => e.Renderer == null || !scannedRenderers.Contains(e.Renderer));
+
             foreach (var renderer in scannedRenderers)
             {
                 bool alreadyExists = existingEntries.Any(entry => entry.Renderer == renderer);
@@ -1787,7 +1867,9 @@ namespace qsyi
                 });
             }
 
-            _menuMeshEntries = existingEntries;
+            _menuMeshEntries.Clear();
+            foreach (var e in existingEntries)
+                _menuMeshEntries.Add(e);
         }
 
         private void EnsureDefaultMenuFolderName()

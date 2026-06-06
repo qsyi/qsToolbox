@@ -523,7 +523,7 @@ namespace qsyi
                 {
                     EditorGUILayout.LabelField("合成するシェイプキー", EditorStyles.boldLabel);
                     
-                    if (_composeShapes.Count == 0)
+                    if (_composeShapes.Count == 0 && string.IsNullOrEmpty(_baseShapeName))
                     {
                         EditorGUILayout.LabelField("右の一覧から「追加」ボタンを押して選択");
                     }
@@ -539,8 +539,25 @@ namespace qsyi
         
         private void DrawComposeShapeList()
         {
+            bool hasBase = !string.IsNullOrEmpty(_baseShapeName);
+
+            if (hasBase)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.Space(BUTTON_WIDTH_SMALL + 4f);
+                    EditorGUILayout.LabelField(new GUIContent(_baseShapeName, _baseShapeName), GUILayout.Width(120));
+                    GUI.enabled = false;
+                    EditorGUILayout.Slider(100f, -100f, 100f);
+                    GUI.enabled = true;
+                }
+            }
+
             for (int i = 0; i < _composeShapes.Count; i++)
             {
+                if (i > 0 || hasBase)
+                    DrawPlusSeparator();
+
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     if (GUILayout.Button("×", GUILayout.Width(BUTTON_WIDTH_SMALL)))
@@ -549,7 +566,7 @@ namespace qsyi
                         i--;
                         continue;
                     }
-                    
+
                     var item = _composeShapes[i];
                     EditorGUILayout.LabelField(new GUIContent(item.name, item.name), GUILayout.Width(120));
 
@@ -557,6 +574,16 @@ namespace qsyi
                     if (!Mathf.Approximately(weight, item.weight))
                         _composeShapes[i] = (item.name, weight);
                 }
+            }
+        }
+
+        private static void DrawPlusSeparator()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.LabelField("＋", GUILayout.Width(20f));
+                GUILayout.FlexibleSpace();
             }
         }
         

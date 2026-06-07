@@ -1,6 +1,7 @@
 {
   "name": "qstoolbox-docs",
   "private": true,
+  "type": "module",
   "scripts": {
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",

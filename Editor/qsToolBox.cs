@@ -61,6 +61,7 @@ namespace qsyi
         private static GUIStyle _tabLeft, _tabMid, _tabRight, _tabScan;
         private static GUIStyle _tabLeftSel, _tabMidSel, _tabRightSel;
         private static GUIStyle _dimBoneStyle;
+        private static GUIStyle _versionBadgeStyle;
         
         private const float BUTTON_WIDTH_SMALL = 20f;
         private const float BUTTON_WIDTH_MEDIUM = 60f;
@@ -190,6 +191,36 @@ namespace qsyi
         
         private void OnGUI()
         {
+            if (QsVersionChecker.HasUpdate || QsVersionChecker.CheckComplete)
+            {
+                if (_versionBadgeStyle == null)
+                    _versionBadgeStyle = new GUIStyle(EditorStyles.miniLabel)
+                    {
+                        fontStyle  = FontStyle.Bold,
+                        alignment  = TextAnchor.MiddleCenter,
+                        normal     = { textColor = Color.white },
+                        padding    = new RectOffset(8, 8, 3, 3),
+                    };
+
+                var content = new GUIContent(QsVersionChecker.HasUpdate
+                    ? $"↑  v{QsVersionChecker.LatestVersion} が公開されています"
+                    : "✓  最新バージョンです");
+
+                Color bgColor = QsVersionChecker.HasUpdate
+                    ? new Color(0.80f, 0.42f, 0.08f)
+                    : new Color(0.18f, 0.58f, 0.28f);
+
+                Vector2 size = _versionBadgeStyle.CalcSize(content);
+                using (new EditorGUILayout.HorizontalScope(GUILayout.Height(size.y + 6f)))
+                {
+                    GUILayout.FlexibleSpace();
+                    Rect rect = GUILayoutUtility.GetRect(size.x, size.y + 6f, GUILayout.ExpandWidth(false));
+                    if (Event.current.type == EventType.Repaint)
+                        EditorGUI.DrawRect(rect, bgColor);
+                    GUI.Label(rect, content, _versionBadgeStyle);
+                }
+            }
+
             CheckForTargetChanges();
             DrawMainTabs();
             

@@ -10,8 +10,8 @@ hero:
       text: インストール
       link: /install
     - theme: alt
-      text: GitHub
-      link: https://github.com/qsyi/qsToolbox
+      text: 使い方
+      link: /features/contextmenu
 
 features:
   - title: 体の明るさが場所によってバラバラ、角度によってパーツまで消えてしまう
@@ -34,7 +34,7 @@ features:
     details: 衣装を選ぶと、素体のスケールに一発で同期できます。Scale Adjuster にも対応！
     link: /features/scale
     linkText: 使い方を見る
-  - title: 顔を改変して干渉してしまっているまばたきを直したい
+  - title: 顔改変後、まばたきが干渉してしまっている
     details: まばたきをベースに選び、改変した目の形をマイナス値で追加して合成するだけで直せます。
     link: /features/blendshape#使用例
     linkText: 使い方を見る

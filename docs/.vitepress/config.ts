@@ -8,7 +8,6 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'ホーム', link: '/' },
-      { text: '使い方', link: '/install' },
     ],
     sidebar: [
       { text: 'インストール', link: '/install' },

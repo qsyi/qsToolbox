@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
+  appearance: 'force-light',
   title: 'qsToolBox',
   description: 'アバター改変効率化ツール',
   lang: 'ja',

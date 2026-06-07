@@ -10,7 +10,7 @@ hero:
       text: インストール
       link: /install
     - theme: alt
-      text: 使い方
+      text: 機能一覧
       link: /features/contextmenu
 
 features:

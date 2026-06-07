@@ -27,7 +27,6 @@ namespace qsyi
         
         private Mode _mode = Mode.Material;
         private Vector2 _scrollPosition;
-        private Vector2 _targetScroll;
         private Vector2 _composeShapeScroll;
         private Vector2 _shapeListScroll;
         private Vector2 _scaleStatusScroll;
@@ -103,9 +102,7 @@ namespace qsyi
             ["Hand L"] = "Lower Arm L", ["Hand R"] = "Lower Arm R",
             ["Breast L"] = "Chest", ["Breast R"] = "Chest"
         };
-        
-[SerializeField] private bool _targetsFoldout = true;
-        private readonly Dictionary<Material, bool> _materialFoldouts = new Dictionary<Material, bool>();
+                private readonly Dictionary<Material, bool> _materialFoldouts = new Dictionary<Material, bool>();
 
         [System.Serializable]
         private class OutfitArmatureEntry
@@ -191,36 +188,6 @@ namespace qsyi
         
         private void OnGUI()
         {
-            if (QsVersionChecker.HasUpdate || QsVersionChecker.CheckComplete)
-            {
-                if (_versionBadgeStyle == null)
-                    _versionBadgeStyle = new GUIStyle(EditorStyles.miniLabel)
-                    {
-                        fontStyle  = FontStyle.Bold,
-                        alignment  = TextAnchor.MiddleCenter,
-                        normal     = { textColor = Color.white },
-                        padding    = new RectOffset(8, 8, 3, 3),
-                    };
-
-                var content = new GUIContent(QsVersionChecker.HasUpdate
-                    ? $"↑  v{QsVersionChecker.LatestVersion} が公開されています"
-                    : "✓  最新バージョンです");
-
-                Color bgColor = QsVersionChecker.HasUpdate
-                    ? new Color(0.80f, 0.42f, 0.08f)
-                    : new Color(0.18f, 0.58f, 0.28f);
-
-                Vector2 size = _versionBadgeStyle.CalcSize(content);
-                using (new EditorGUILayout.HorizontalScope(GUILayout.Height(size.y + 6f)))
-                {
-                    GUILayout.FlexibleSpace();
-                    Rect rect = GUILayoutUtility.GetRect(size.x, size.y + 6f, GUILayout.ExpandWidth(false));
-                    if (Event.current.type == EventType.Repaint)
-                        EditorGUI.DrawRect(rect, bgColor);
-                    GUI.Label(rect, content, _versionBadgeStyle);
-                }
-            }
-
             CheckForTargetChanges();
             DrawMainTabs();
             
@@ -245,23 +212,44 @@ namespace qsyi
             {
                 _serializedObject.Update();
 
-                int validCount = _targets.Count(t => t != null);
-                string summary = validCount > 0 ? $"  ({validCount} 件)" : "";
+                // 探索対象ラベル + バージョンバッジを同一行に
                 EditorGUILayout.BeginHorizontal();
-                _targetsFoldout = EditorGUILayout.Foldout(_targetsFoldout, $"探索対象{summary}", true, EditorStyles.foldoutHeader);
+                EditorGUILayout.LabelField("探索対象", EditorStyles.boldLabel);
+
+                if (QsVersionChecker.HasUpdate || QsVersionChecker.CheckComplete)
+                {
+                    Color accentColor = QsVersionChecker.HasUpdate
+                        ? new Color(0.80f, 0.42f, 0.08f)
+                        : new Color(0.18f, 0.58f, 0.28f);
+
+                    if (_versionBadgeStyle == null)
+                        _versionBadgeStyle = new GUIStyle(EditorStyles.miniLabel)
+                        {
+                            fontStyle = FontStyle.Normal,
+                            alignment = TextAnchor.MiddleLeft,
+                            padding   = new RectOffset(8, 8, 2, 2),
+                        };
+                    _versionBadgeStyle.normal.textColor = accentColor;
+
+                    var badgeContent = new GUIContent(QsVersionChecker.HasUpdate
+                        ? $"↑ v{QsVersionChecker.LatestVersion} が公開されています"
+                        : $"✓ v{QsVersionChecker.CurrentVersion} 最新バージョンです");
+
+                    float lineH = EditorGUIUtility.singleLineHeight;
+                    Vector2 badgeSize = _versionBadgeStyle.CalcSize(badgeContent);
+                    Rect badgeRect = GUILayoutUtility.GetRect(badgeSize.x + 4f, lineH, GUILayout.ExpandWidth(false));
+                    if (Event.current.type == EventType.Repaint)
+                    {
+                        EditorGUI.DrawRect(badgeRect, new Color(accentColor.r, accentColor.g, accentColor.b, 0.10f));
+                        EditorGUI.DrawRect(new Rect(badgeRect.x, badgeRect.y, 3f, badgeRect.height), accentColor);
+                    }
+                    GUI.Label(badgeRect, badgeContent, _versionBadgeStyle);
+                }
                 EditorGUILayout.EndHorizontal();
 
-                bool changed = false;
-                if (_targetsFoldout)
-                {
-                    EditorGUI.BeginChangeCheck();
-                    float propHeight = EditorGUI.GetPropertyHeight(_targetsProperty, GUIContent.none, true);
-                    float scrollHeight = Mathf.Min(propHeight, 120f);
-                    _targetScroll = EditorGUILayout.BeginScrollView(_targetScroll, GUILayout.Height(scrollHeight));
-                    EditorGUILayout.PropertyField(_targetsProperty, GUIContent.none, true);
-                    EditorGUILayout.EndScrollView();
-                    changed = EditorGUI.EndChangeCheck();
-                }
+                EditorGUI.BeginChangeCheck();
+                EditorGUILayout.PropertyField(_targetsProperty, GUIContent.none, true);
+                bool changed = EditorGUI.EndChangeCheck();
 
                 _serializedObject.ApplyModifiedProperties();
 
@@ -435,16 +423,14 @@ namespace qsyi
         {
             using (new EditorGUILayout.VerticalScope())
             {
-                float executeAreaHeight = CanExecuteCompose() ? 60f : 100f;
-                float upperContentHeight = Mathf.Max(80f, position.height - 120f - executeAreaHeight);
-                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition, GUILayout.Height(upperContentHeight));
+                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition, GUILayout.ExpandHeight(true));
 
                 DrawComposeTargetSelection();
                 DrawBaseShapeSelection();
                 DrawComposeShapeAndListSelection();
-                
+
                 EditorGUILayout.EndScrollView();
-                
+
                 DrawComposeExecuteButton();
             }
         }

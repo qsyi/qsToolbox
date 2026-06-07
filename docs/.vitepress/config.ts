@@ -15,13 +15,22 @@ export default defineConfig({
       {
         text: '機能',
         items: [
-          { text: 'マテリアル', link: '/features/material' },
-          { text: 'シェイプキー', link: '/features/blendshape' },
-          { text: 'スケール', link: '/features/scale' },
-          { text: 'メニュー生成', link: '/features/menu' },
+          { text: '右クリックメニュー', link: '/features/contextmenu' },
+          { text: 'ブックマーク', link: '/features/bookmark' },
+          { text: 'ワンボタンでEditorOnly', link: '/features/editoronly' },
+          {
+            text: 'qsToolBox ウィンドウ',
+            items: [
+              { text: 'マテリアル', link: '/features/material' },
+              { text: 'ブレンドシェイプ', link: '/features/blendshape' },
+              { text: 'スケール', link: '/features/scale' },
+              { text: 'メニュー生成', link: '/features/menu' },
+            ]
+          },
         ]
       }
     ],
+    outline: false,
     socialLinks: [
       { icon: 'github', link: 'https://github.com/qsyi/qsToolbox' }
     ]

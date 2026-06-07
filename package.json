@@ -1,6 +1,6 @@
 {
   "name": "jp.qsyi.qs-toolbox",
-  "version": "1.5.5",
+  "version": "1.5.4",
   "displayName": "qsToolBox",
   "unity": "2022.3",
   "vpmDependencies": {

@@ -1,5 +1,4 @@
 #if UNITY_EDITOR
-using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine.Networking;
@@ -9,11 +8,10 @@ namespace qsyi
     [InitializeOnLoad]
     internal static class QsVersionChecker
     {
-        private const string PACKAGE_NAME         = "jp.qsyi.qs-toolbox";
-        private const string GITHUB_API_URL        = "https://api.github.com/repos/qsyi/qsToolbox/releases/latest";
-        private const string LAST_CHECK_KEY        = "qsToolBox_lastVersionCheck";
-        private const string LATEST_VER_KEY        = "qsToolBox_latestVersion";
-        private const double CHECK_INTERVAL_HOURS  = 24.0;
+        private const string PACKAGE_NAME       = "jp.qsyi.qs-toolbox";
+        private const string GITHUB_API_URL     = "https://api.github.com/repos/qsyi/qsToolbox/releases/latest";
+        private const string LATEST_VER_KEY     = "qsToolBox_latestVersion";
+        private const string SESSION_FETCHED_KEY = "qsToolBox_fetchedThisSession";
 
         public static bool   HasUpdate      { get; private set; }
         public static bool   CheckComplete  { get; private set; }
@@ -33,18 +31,17 @@ namespace qsyi
             CurrentVersion = current;
             if (string.IsNullOrEmpty(current)) return;
 
-            // キャッシュ済みの結果で即時判定
+            // キャッシュ済みの結果で即時表示
             string cached = EditorPrefs.GetString(LATEST_VER_KEY, "");
             if (!string.IsNullOrEmpty(cached))
                 TrySetUpdate(current, cached);
 
-            // 24時間以内にチェック済みならフェッチしない
-            string lastCheckStr = EditorPrefs.GetString(LAST_CHECK_KEY, "");
-            if (DateTime.TryParse(lastCheckStr, out DateTime lastCheck) &&
-                (DateTime.UtcNow - lastCheck).TotalHours < CHECK_INTERVAL_HOURS)
-                return;
-
-            FetchLatestVersion();
+            // 起動後初回のみフェッチ（リコンパイルではスキップ）
+            if (!SessionState.GetBool(SESSION_FETCHED_KEY, false))
+            {
+                SessionState.SetBool(SESSION_FETCHED_KEY, true);
+                FetchLatestVersion();
+            }
         }
 
         private static void FetchLatestVersion()
@@ -67,7 +64,6 @@ namespace qsyi
                 string tagName = ExtractTagName(_request.downloadHandler.text);
                 if (!string.IsNullOrEmpty(tagName))
                 {
-                    EditorPrefs.SetString(LAST_CHECK_KEY, DateTime.UtcNow.ToString("O"));
                     EditorPrefs.SetString(LATEST_VER_KEY, tagName);
                     string current = GetCurrentVersion();
                     if (!string.IsNullOrEmpty(current))

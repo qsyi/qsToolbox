@@ -47,7 +47,7 @@ namespace qsyi
                     meshSettings.RootBone = new AvatarObjectReference();
                 meshSettings.RootBone.Set(hipsBone.gameObject);
             }
-            meshSettings.Bounds = new Bounds(Vector3.zero, Vector3.one);
+            meshSettings.Bounds = new Bounds(Vector3.zero, Vector3.one * 2f);
             EditorUtility.SetDirty(go);
 
             if (go.GetComponent<ModularAvatarConvertConstraints>() == null)

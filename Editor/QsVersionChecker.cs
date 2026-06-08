@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.IO;
+using UnityEngine;
 using UnityEditor;
 using UnityEngine.Networking;
 
@@ -16,6 +17,7 @@ namespace qsyi
 
         public static bool   HasUpdate      { get; private set; }
         public static bool   CheckComplete  { get; private set; }
+        public static bool   IsFetching     { get; private set; }
         public static string LatestVersion  { get; private set; } = "";
         public static string CurrentVersion { get; private set; } = "";
 
@@ -47,6 +49,7 @@ namespace qsyi
 
         private static void FetchLatestVersion()
         {
+            IsFetching = true;
             _request = new UnityWebRequest(GITHUB_API_URL, "GET");
             _request.downloadHandler = new DownloadHandlerBuffer();
             _request.SetRequestHeader("User-Agent", "qsToolBox-VersionChecker");
@@ -74,6 +77,14 @@ namespace qsyi
 
             _request.Dispose();
             _request = null;
+            IsFetching = false;
+
+            // フェッチ完了後にウィンドウを再描画
+            EditorApplication.delayCall += () =>
+            {
+                foreach (var w in Resources.FindObjectsOfTypeAll<QsToolBox>())
+                    w.Repaint();
+            };
         }
 
         private static void TrySetUpdate(string current, string latest)

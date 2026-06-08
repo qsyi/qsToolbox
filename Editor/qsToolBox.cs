@@ -16,7 +16,7 @@ namespace qsyi
     internal class QsToolBox : EditorWindow
     {
         private enum Mode { Material, BlendShape, Scale, MenuGenerator }
-        
+
         [SerializeField] private List<GameObject> _targets = new List<GameObject>();
         [SerializeField] private Transform _avatarArmature;
         [SerializeField] private List<OutfitArmatureEntry> _outfitArmatureEntries = new List<OutfitArmatureEntry>();
@@ -24,14 +24,14 @@ namespace qsyi
         [SerializeField] private bool _autoSyncRotation;
         [SerializeField] private bool _menuPreviewEnabled = true;
         [SerializeField] private List<MenuMeshEntry> _menuMeshEntries = new List<MenuMeshEntry>();
-        
+
         private Mode _mode = Mode.Material;
         private Vector2 _scrollPosition;
         private Vector2 _composeShapeScroll;
         private Vector2 _shapeListScroll;
         private Vector2 _scaleStatusScroll;
         private Vector2 _menuRendererScroll;
-        
+
         private readonly List<SkinnedMeshRenderer> _skinnedMeshRenderers = new List<SkinnedMeshRenderer>();
         private readonly List<Material> _materials = new List<Material>();
         private readonly Dictionary<Material, List<(Renderer renderer, int slot)>> _materialUsage = new Dictionary<Material, List<(Renderer, int)>>();
@@ -45,7 +45,7 @@ namespace qsyi
         private string _newShapeName = "";
         private bool _overwriteShape = true;
         private string _menuFolderName = "";
-        
+
         private SerializedObject _serializedObject;
         private SerializedProperty _targetsProperty;
         private SerializedProperty _armatureProperty;
@@ -61,7 +61,8 @@ namespace qsyi
         private static GUIStyle _tabLeftSel, _tabMidSel, _tabRightSel;
         private static GUIStyle _dimBoneStyle;
         private static GUIStyle _versionBadgeStyle;
-        
+        private double _syncCompletedTime = -1.0;
+
         private const float BUTTON_WIDTH_SMALL = 20f;
         private const float BUTTON_WIDTH_MEDIUM = 60f;
         private const float BUTTON_WIDTH_LARGE = 80f;
@@ -75,7 +76,7 @@ namespace qsyi
         private static Color TargetColor  => EditorGUIUtility.isProSkin ? new Color(0.28f, 0.26f, 0.20f, 1f) : new Color(0.96f, 0.93f, 0.82f, 1f);
         private static Color BaseColor    => EditorGUIUtility.isProSkin ? new Color(0.22f, 0.26f, 0.23f, 1f) : new Color(0.85f, 0.92f, 0.86f, 1f);
         private static Color AccentColor  => new Color(0.30f, 0.60f, 1.00f, 1f);
-        
+
         private static readonly string[] TAB_NAMES = { "マテリアル", "ブレンドシェイプ", "スケール", "メニュー生成" };
         private static readonly GUIContent[] TAB_TOOLTIPS = {
             new GUIContent("マテリアル", "探索対象のマテリアルを置換できます"),
@@ -118,15 +119,24 @@ namespace qsyi
             public SkinnedMeshRenderer Renderer;
             public bool Include;
         }
-        
+
         [MenuItem("Tools/qs/ツールボックス %q")]
         public static void ShowWindow()
         {
             var window = GetWindow<QsToolBox>("qsToolBox");
-            window._targets = new List<GameObject>(Selection.gameObjects);
+            var selected = Selection.gameObjects;
+            if (selected.Length > 0)
+            {
+                window._serializedObject.Update();
+                window._targetsProperty.arraySize = selected.Length;
+                for (int i = 0; i < selected.Length; i++)
+                    window._targetsProperty.GetArrayElementAtIndex(i).objectReferenceValue = selected[i];
+                window._serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            }
             window.ScanData();
+            window.Repaint();
         }
-        
+
         private void OnEnable()
         {
             InitializeSerializedObject();
@@ -139,7 +149,7 @@ namespace qsyi
             RestoreMenuPreviewState();
             EditorApplication.hierarchyChanged -= OnHierarchyChanged;
         }
-        
+
         private void InitializeSerializedObject()
         {
             _serializedObject = new SerializedObject(this);
@@ -148,7 +158,7 @@ namespace qsyi
             _outfitArmatureEntriesProperty = _serializedObject.FindProperty("_outfitArmatureEntries");
             _menuMeshEntriesProperty = _serializedObject.FindProperty("_menuMeshEntries");
             _targetsProperty.isExpanded = true;
-            _outfitArmatureEntriesProperty.isExpanded = true;
+            _outfitArmatureEntriesProperty.isExpanded = false;
             InitializeMenuMeshEntriesList();
         }
 
@@ -183,29 +193,29 @@ namespace qsyi
                 _serializedObject.ApplyModifiedProperties();
             };
         }
-        
+
         private void OnHierarchyChanged() => _isDirty = true;
-        
+
         private void OnGUI()
         {
             CheckForTargetChanges();
             DrawMainTabs();
-            
+
             EditorGUILayout.Space();
-            
+
             switch (_mode)
             {
-                case Mode.Material: 
+                case Mode.Material:
                     DrawMaterialReplace();
                     break;
-                case Mode.BlendShape: 
+                case Mode.BlendShape:
                     DrawBlendShapeCompose();
                     break;
                 case Mode.Scale: DrawScaleAdjustment(); break;
                 case Mode.MenuGenerator: DrawMenuGenerator(); break;
             }
         }
-        
+
         private void CheckForTargetChanges()
         {
             DrawColoredBox(TargetColor, () =>
@@ -216,19 +226,19 @@ namespace qsyi
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.LabelField("探索対象", EditorStyles.boldLabel);
 
+                if (_versionBadgeStyle == null)
+                    _versionBadgeStyle = new GUIStyle(EditorStyles.miniLabel)
+                    {
+                        fontStyle = FontStyle.Normal,
+                        alignment = TextAnchor.MiddleLeft,
+                        padding   = new RectOffset(8, 8, 2, 2),
+                    };
+
                 if (QsVersionChecker.HasUpdate || QsVersionChecker.CheckComplete)
                 {
                     Color accentColor = QsVersionChecker.HasUpdate
                         ? new Color(0.80f, 0.42f, 0.08f)
                         : new Color(0.18f, 0.58f, 0.28f);
-
-                    if (_versionBadgeStyle == null)
-                        _versionBadgeStyle = new GUIStyle(EditorStyles.miniLabel)
-                        {
-                            fontStyle = FontStyle.Normal,
-                            alignment = TextAnchor.MiddleLeft,
-                            padding   = new RectOffset(8, 8, 2, 2),
-                        };
                     _versionBadgeStyle.normal.textColor = accentColor;
 
                     var badgeContent = new GUIContent(QsVersionChecker.HasUpdate
@@ -244,6 +254,20 @@ namespace qsyi
                         EditorGUI.DrawRect(new Rect(badgeRect.x, badgeRect.y, 3f, badgeRect.height), accentColor);
                     }
                     GUI.Label(badgeRect, badgeContent, _versionBadgeStyle);
+                }
+                else if (QsVersionChecker.IsFetching)
+                {
+                    Color dimColor = EditorGUIUtility.isProSkin
+                        ? new Color(0.50f, 0.50f, 0.50f)
+                        : new Color(0.45f, 0.45f, 0.45f);
+                    _versionBadgeStyle.normal.textColor = dimColor;
+
+                    var fetchingContent = new GUIContent("確認中…");
+                    float lineH = EditorGUIUtility.singleLineHeight;
+                    Vector2 badgeSize = _versionBadgeStyle.CalcSize(fetchingContent);
+                    Rect badgeRect = GUILayoutUtility.GetRect(badgeSize.x + 4f, lineH, GUILayout.ExpandWidth(false));
+                    GUI.Label(badgeRect, fetchingContent, _versionBadgeStyle);
+                    Repaint();
                 }
                 EditorGUILayout.EndHorizontal();
 
@@ -262,7 +286,7 @@ namespace qsyi
                 }
             });
         }
-        
+
         private int GetTargetHash()
         {
             int hash = _targets.Count;
@@ -271,7 +295,7 @@ namespace qsyi
                     hash = hash * 31 + target.GetInstanceID();
             return hash;
         }
-        
+
         private void DrawMainTabs()
         {
             DrawSeparator();
@@ -287,7 +311,7 @@ namespace qsyi
                 _scrollPosition = Vector2.zero;
             }, true);
         }
-        
+
         private void DrawTabButtons(string[] tabNames, GUIContent[] tooltips, int selectedIndex, System.Action<int> onTabSelected, bool showScanButton)
         {
             const float tabHeight = 28f;
@@ -341,30 +365,30 @@ namespace qsyi
             }
             EditorGUILayout.EndHorizontal();
         }
-        
+
         private GUIStyle GetButtonStyle(int index, int totalCount)
         {
             if (index == 0) return EditorStyles.miniButtonLeft;
             if (index == totalCount - 1) return EditorStyles.miniButtonRight;
             return EditorStyles.miniButtonMid;
         }
-        
+
         private void DrawMaterialReplace()
         {
-            DrawColoredBox(HeaderColor, () => 
+            DrawColoredBox(HeaderColor, () =>
             {
                 EditorGUILayout.LabelField("マテリアル置換", EditorStyles.boldLabel);
                 EditorGUILayout.HelpBox("マテリアルを直接ドラッグ＆ドロップで置換", MessageType.Info);
             });
-            
+
             if (_materials.Count == 0)
             {
                 EditorGUILayout.HelpBox("マテリアルが見つかりません。", MessageType.Info);
                 return;
             }
-            
+
             _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
-            
+
             foreach (var material in _materials)
             {
                 EditorGUILayout.BeginHorizontal();
@@ -415,10 +439,10 @@ namespace qsyi
 
                 DrawSeparator();
             }
-            
+
             EditorGUILayout.EndScrollView();
         }
-        
+
         private void DrawBlendShapeCompose()
         {
             using (new EditorGUILayout.VerticalScope())
@@ -434,18 +458,18 @@ namespace qsyi
                 DrawComposeExecuteButton();
             }
         }
-        
+
         private void DrawComposeTargetSelection()
         {
-            DrawColoredBox(HeaderColor, () => 
+            DrawColoredBox(HeaderColor, () =>
             {
                 EditorGUILayout.LabelField("シェイプキー合成", EditorStyles.boldLabel);
-                
+
                 EditorGUI.BeginChangeCheck();
                 _composeTarget = EditorGUILayout.ObjectField(
-                    new GUIContent("対象メッシュ", "合成対象のSkinnedMeshRenderer"), 
+                    new GUIContent("対象メッシュ", "合成対象のSkinnedMeshRenderer"),
                     _composeTarget, typeof(SkinnedMeshRenderer), true) as SkinnedMeshRenderer;
-                
+
                 if (EditorGUI.EndChangeCheck())
                 {
                     ResetComposeData();
@@ -453,10 +477,10 @@ namespace qsyi
                 }
             });
         }
-        
+
         private void DrawBaseShapeSelection()
         {
-            DrawColoredBox(BaseColor, () => 
+            DrawColoredBox(BaseColor, () =>
             {
                 EditorGUILayout.LabelField("ベースシェイプキー", EditorStyles.boldLabel);
                 DrawBaseShapeInfo();
@@ -464,7 +488,7 @@ namespace qsyi
                 DrawNewShapeNameField();
             });
         }
-        
+
         private void DrawBaseShapeInfo()
         {
             if (string.IsNullOrEmpty(_baseShapeName))
@@ -491,12 +515,12 @@ namespace qsyi
                 }
             }
         }
-        
+
         private void DrawOverwriteSettings()
         {
             EditorGUI.BeginChangeCheck();
             _overwriteShape = EditorGUILayout.Toggle(new GUIContent("シェイプキーを上書きする", "チェックを入れるとベースシェイプキーを上書きします"), _overwriteShape);
-            
+
             if (EditorGUI.EndChangeCheck())
             {
                 if (_overwriteShape && !string.IsNullOrEmpty(_baseShapeName))
@@ -505,7 +529,7 @@ namespace qsyi
                     _newShapeName = string.IsNullOrEmpty(_baseShapeName) ? "" : _baseShapeName + "_合成";
             }
         }
-        
+
         private void DrawNewShapeNameField()
         {
             if (!_overwriteShape)
@@ -517,7 +541,7 @@ namespace qsyi
                 EditorGUILayout.LabelField("上書き対象", string.IsNullOrEmpty(_baseShapeName) ? "未選択" : _baseShapeName);
             }
         }
-        
+
         private void DrawComposeShapeAndListSelection()
         {
             using (new EditorGUILayout.HorizontalScope())
@@ -531,15 +555,15 @@ namespace qsyi
                 DrawShapeSelectionList();
             }
         }
-        
+
         private void DrawComposeShapeSelection()
         {
             using (new EditorGUILayout.VerticalScope(GUILayout.Width(EditorGUIUtility.currentViewWidth * VIEW_WIDTH_RATIO)))
             {
-                DrawColoredBox(SelectColor, () => 
+                DrawColoredBox(SelectColor, () =>
                 {
                     EditorGUILayout.LabelField("合成するシェイプキー", EditorStyles.boldLabel);
-                    
+
                     if (_composeShapes.Count == 0 && string.IsNullOrEmpty(_baseShapeName))
                     {
                         EditorGUILayout.LabelField("右の一覧から「追加」ボタンを押して選択");
@@ -553,7 +577,7 @@ namespace qsyi
                 });
             }
         }
-        
+
         private void DrawComposeShapeList()
         {
             bool hasBase = !string.IsNullOrEmpty(_baseShapeName);
@@ -603,15 +627,15 @@ namespace qsyi
                 GUILayout.FlexibleSpace();
             }
         }
-        
+
         private void DrawShapeSelectionList()
         {
             using (new EditorGUILayout.VerticalScope())
             {
-                DrawColoredBox(ContentColor, () => 
+                DrawColoredBox(ContentColor, () =>
                 {
                     EditorGUILayout.LabelField("シェイプキー一覧", EditorStyles.boldLabel);
-                    
+
                     using (new EditorGUILayout.HorizontalScope())
                     {
                         _composeSearchText = EditorGUILayout.TextField("検索", _composeSearchText);
@@ -619,28 +643,28 @@ namespace qsyi
                             _composeSearchText = "";
                     }
                     EditorGUILayout.Space(5);
-                    
+
                     _shapeListScroll = EditorGUILayout.BeginScrollView(_shapeListScroll, GUILayout.Height(SCROLL_HEIGHT));
                     DrawAvailableShapeList();
                     EditorGUILayout.EndScrollView();
                 });
             }
         }
-        
+
         private void DrawAvailableShapeList()
         {
-            if (_shapeNames.Count == 0) 
+            if (_shapeNames.Count == 0)
             {
                 EditorGUILayout.LabelField("シェイプキーがありません");
                 return;
             }
-            
+
             foreach (var shapeName in _shapeNames)
             {
-                if (!string.IsNullOrEmpty(_composeSearchText) && 
+                if (!string.IsNullOrEmpty(_composeSearchText) &&
                     !shapeName.Contains(_composeSearchText, System.StringComparison.OrdinalIgnoreCase))
                     continue;
-                
+
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     DrawBaseShapeSelectionButton(shapeName);
@@ -649,7 +673,7 @@ namespace qsyi
                 }
             }
         }
-        
+
         private void DrawBaseShapeSelectionButton(string shapeName)
         {
             bool isBase = shapeName == _baseShapeName;
@@ -664,7 +688,7 @@ namespace qsyi
             }
             GUI.backgroundColor = prevBg;
         }
-        
+
         private void DrawAddShapeButton(string shapeName)
         {
             if (GUILayout.Button("追加", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
@@ -672,7 +696,7 @@ namespace qsyi
                 _composeShapes.Add((shapeName, 100f));
             }
         }
-        
+
         private void DrawComposeExecuteButton()
         {
             DrawColoredBox(HeaderColor, () =>
@@ -700,21 +724,21 @@ namespace qsyi
                 }
             });
         }
-        
+
         private bool CanExecuteCompose()
         {
             return _composeTarget?.sharedMesh != null &&
                    !string.IsNullOrEmpty(_baseShapeName) &&
                    (_overwriteShape || !string.IsNullOrEmpty(_newShapeName));
         }
-        
+
         private void ResetComposeData()
         {
             _composeShapes.Clear();
             _baseShapeName = "";
             _newShapeName = "";
         }
-        
+
         private void ExecuteShapeCompose()
         {
             if (_composeTarget?.sharedMesh == null || string.IsNullOrEmpty(_baseShapeName))
@@ -722,34 +746,34 @@ namespace qsyi
                 EditorUtility.DisplayDialog("エラー", "ベースシェイプキーが選択されていません。", "OK");
                 return;
             }
-            
+
             string targetName = _overwriteShape ? _baseShapeName : _newShapeName;
-            
+
             if (string.IsNullOrEmpty(targetName))
             {
                 EditorUtility.DisplayDialog("エラー", "出力名が指定されていません。", "OK");
                 return;
             }
-            
+
             var originalMesh = _composeTarget.sharedMesh;
-            
+
             if (!_overwriteShape && CheckForDuplicateShapeName(originalMesh, targetName))
                 return;
-            
+
             try
             {
                 EditorUtility.DisplayProgressBar("合成中", "メッシュ処理中...", 0f);
-                
+
                 var newMesh = CreateComposedMesh(originalMesh, targetName);
                 if (newMesh == null) return;
-                
+
                 EditorUtility.DisplayProgressBar("合成中", "保存中...", 0.8f);
-                
+
                 string savePath = SaveMeshAsset(newMesh, targetName);
                 if (string.IsNullOrEmpty(savePath)) return;
-                
+
                 EditorUtility.DisplayProgressBar("合成中", "適用中...", 0.9f);
-                
+
                 ApplyComposedMesh(newMesh, savePath, targetName);
             }
             catch (System.Exception e)
@@ -762,7 +786,7 @@ namespace qsyi
                 EditorUtility.ClearProgressBar();
             }
         }
-        
+
         private bool CheckForDuplicateShapeName(Mesh mesh, string targetName)
         {
             for (int i = 0; i < mesh.blendShapeCount; i++)
@@ -774,21 +798,21 @@ namespace qsyi
             }
             return false;
         }
-        
+
         private Mesh CreateComposedMesh(Mesh originalMesh, string targetName)
         {
             var mesh = Object.Instantiate(originalMesh);
             mesh.name = $"{originalMesh.name}_Composed";
-            
+
             int baseIndex = FindBlendShapeIndex(originalMesh, _baseShapeName);
             if (baseIndex < 0)
             {
                 EditorUtility.DisplayDialog("エラー", $"ベースシェイプキー「{_baseShapeName}」が見つかりません。", "OK");
                 return null;
             }
-            
+
             var composedDeltas = ComputeComposedDeltas(originalMesh, baseIndex);
-            
+
             if (_overwriteShape)
             {
                 return CreateMeshWithReplacedShape(mesh, originalMesh, targetName, composedDeltas);
@@ -804,7 +828,7 @@ namespace qsyi
                 return mesh;
             }
         }
-        
+
         private int FindBlendShapeIndex(Mesh mesh, string shapeName)
         {
             for (int i = 0; i < mesh.blendShapeCount; i++)
@@ -814,29 +838,29 @@ namespace qsyi
             }
             return -1;
         }
-        
+
         private (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) ComputeComposedDeltas(Mesh originalMesh, int baseIndex)
         {
             var vertices = originalMesh.vertices;
             var normals = originalMesh.normals;
             var tangents = originalMesh.tangents;
-            
+
             var composedVertices = new Vector3[vertices.Length];
             var composedNormals = new Vector3[normals.Length];
             var composedTangents = new Vector3[tangents.Length];
-            
+
             System.Array.Copy(vertices, composedVertices, vertices.Length);
             System.Array.Copy(normals, composedNormals, normals.Length);
             for (int i = 0; i < tangents.Length; i++)
                 composedTangents[i] = tangents[i];
-            
+
             ApplyBaseShapeDeltas(originalMesh, baseIndex, composedVertices, composedNormals, composedTangents);
             ApplyComposeShapeDeltas(originalMesh, composedVertices, composedNormals, composedTangents);
-            
+
             var finalDeltas = ComputeFinalDeltas(vertices, normals, tangents, composedVertices, composedNormals, composedTangents);
             return finalDeltas;
         }
-        
+
         private void ApplyBaseShapeDeltas(Mesh mesh, int baseIndex, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
         {
             var deltaVertices = new Vector3[vertices.Length];
@@ -845,7 +869,7 @@ namespace qsyi
 
             int lastFrame = mesh.GetBlendShapeFrameCount(baseIndex) - 1;
             mesh.GetBlendShapeFrameVertices(baseIndex, lastFrame, deltaVertices, deltaNormals, deltaTangents);
-            
+
             for (int i = 0; i < vertices.Length; i++)
             {
                 vertices[i] += deltaVertices[i];
@@ -853,28 +877,28 @@ namespace qsyi
                 tangents[i] += deltaTangents[i];
             }
         }
-        
+
         private void ApplyComposeShapeDeltas(Mesh mesh, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
         {
             if (_composeShapes.Count == 0) return;
 
             float progress = 0.2f;
             float step = 0.6f / _composeShapes.Count;
-            
+
             foreach (var (name, weight) in _composeShapes)
             {
                 EditorUtility.DisplayProgressBar("合成中", $"処理中: {name}", progress);
-                
+
                 int index = FindBlendShapeIndex(mesh, name);
                 if (index >= 0)
                 {
                     ApplyShapeDelta(mesh, index, weight, vertices, normals, tangents);
                 }
-                
+
                 progress += step;
             }
         }
-        
+
         private void ApplyShapeDelta(Mesh mesh, int index, float weight, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
         {
             var deltaVertices = new Vector3[vertices.Length];
@@ -883,7 +907,7 @@ namespace qsyi
 
             int lastFrame = mesh.GetBlendShapeFrameCount(index) - 1;
             mesh.GetBlendShapeFrameVertices(index, lastFrame, deltaVertices, deltaNormals, deltaTangents);
-            
+
             float multiplier = weight / 100f;
             for (int i = 0; i < vertices.Length; i++)
             {
@@ -892,7 +916,7 @@ namespace qsyi
                 tangents[i] += deltaTangents[i] * multiplier;
             }
         }
-        
+
         private (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) ComputeFinalDeltas(
             Vector3[] originalVertices, Vector3[] originalNormals, Vector4[] originalTangents,
             Vector3[] composedVertices, Vector3[] composedNormals, Vector3[] composedTangents)
@@ -900,17 +924,17 @@ namespace qsyi
             var deltaVertices = new Vector3[originalVertices.Length];
             var deltaNormals = new Vector3[originalNormals.Length];
             var deltaTangents = new Vector3[originalTangents.Length];
-            
+
             for (int i = 0; i < originalVertices.Length; i++)
             {
                 deltaVertices[i] = composedVertices[i] - originalVertices[i];
                 deltaNormals[i] = composedNormals[i] - originalNormals[i];
                 deltaTangents[i] = composedTangents[i] - new Vector3(originalTangents[i].x, originalTangents[i].y, originalTangents[i].z);
             }
-            
+
             return (deltaVertices, deltaNormals, deltaTangents);
         }
-        
+
         private static Mesh CreateMeshWithReplacedShape(Mesh mesh, Mesh originalMesh, string targetName, (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) deltas)
         {
             mesh.ClearBlendShapes();
@@ -924,7 +948,7 @@ namespace qsyi
             }
             return mesh;
         }
-        
+
         private static void CopyExistingBlendShape(Mesh originalMesh, Mesh targetMesh, int shapeIndex, string shapeName)
         {
             int vertexCount = originalMesh.vertexCount;
@@ -939,7 +963,7 @@ namespace qsyi
                 targetMesh.AddBlendShapeFrame(shapeName, frameWeight, deltaVertices, deltaNormals, deltaTangents);
             }
         }
-        
+
         private string SaveMeshAsset(Mesh mesh, string shapeName)
         {
             string saveDirectory = "Assets/qsyi/GeneratedMeshes";
@@ -959,46 +983,46 @@ namespace qsyi
                 fileName = $"{timestamp}_{counter++}.asset";
                 filePath = Path.Combine(saveDirectory, fileName);
             }
-            
+
             AssetDatabase.CreateAsset(mesh, filePath);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            
+
             return filePath;
         }
-        
+
         private void ApplyComposedMesh(Mesh newMesh, string savePath, string targetName)
         {
             Undo.RecordObject(_composeTarget, "Compose BlendShapes");
             _composeTarget.sharedMesh = newMesh;
             EditorUtility.SetDirty(_composeTarget);
-            
+
             EditorUtility.DisplayDialog("完了", $"「{targetName}」を合成しました。\n{savePath}", "OK");
             ScanForCompose();
         }
-        
+
         private void DrawScaleAdjustment()
         {
             using (new EditorGUILayout.VerticalScope(GUILayout.ExpandHeight(true)))
             {
                 DrawArmatureSettings();
-                
+
                 bool hasOutfitBones = _outfitBones.Count > 0;
                 bool hasAvatarBones = _avatarBones.Count > 0;
-                
-                DrawColoredBox(HeaderColor, () => 
+
+                DrawColoredBox(HeaderColor, () =>
                 {
                     bool isValidTarget = _targets.Count > 0 && _targets.All(t => t?.GetComponent<ModularAvatarMeshSettings>() != null);
                     if (!isValidTarget)
                     {
                         EditorGUILayout.HelpBox("SetupOutfitした衣装を入れてください。", MessageType.Error);
                     }
-                    
+
                     if (!hasOutfitBones)
                     {
                         EditorGUILayout.HelpBox("衣装のボーンが見つかりません。", MessageType.Warning);
                     }
-                    
+
                     if (!hasAvatarBones && _avatarArmature != null)
                     {
                         EditorGUILayout.HelpBox("素体のボーンが見つかりません。", MessageType.Warning);
@@ -1102,7 +1126,7 @@ namespace qsyi
 
         private void DrawArmatureSettings()
         {
-            DrawColoredBox(HeaderColor, () => 
+            DrawColoredBox(HeaderColor, () =>
             {
                 _serializedObject.Update();
                 EditorGUI.BeginChangeCheck();
@@ -1110,16 +1134,16 @@ namespace qsyi
                 DrawOutfitArmatureSettings();
                 bool changed = EditorGUI.EndChangeCheck();
                 _serializedObject.ApplyModifiedProperties();
-                
+
                 var armature = _armatureProperty.objectReferenceValue as Transform;
                 if (armature != _avatarArmature)
                 {
                     _avatarArmature = armature;
                 }
-                
+
                 if (_avatarArmature == null)
                     EditorGUILayout.HelpBox("素体のArmatureを設定してください。", MessageType.Warning);
-                
+
                 if (changed)
                     ScanBones();
             });
@@ -1138,18 +1162,34 @@ namespace qsyi
                 return;
             }
 
+            _outfitArmatureEntriesProperty.isExpanded = EditorGUILayout.Foldout(
+                _outfitArmatureEntriesProperty.isExpanded,
+                "衣装Armature",
+                true);
+
+            if (!_outfitArmatureEntriesProperty.isExpanded)
+                return;
+
+            EditorGUI.indentLevel++;
             foreach (var outfit in targetOutfits)
             {
                 var entry = GetOrCreateOutfitArmatureEntry(outfit);
-                int index = _outfitArmatureEntries.IndexOf(entry);
-                if (index < 0) continue;
+                int entryIndex = _outfitArmatureEntries.IndexOf(entry);
+                if (entryIndex < 0) continue;
 
-                var entryProperty = _outfitArmatureEntriesProperty.GetArrayElementAtIndex(index);
+                var entryProperty = _outfitArmatureEntriesProperty.GetArrayElementAtIndex(entryIndex);
                 var armaturesProperty = entryProperty.FindPropertyRelative("Armatures");
-                EditorGUILayout.PropertyField(armaturesProperty, new GUIContent("衣装Armature"), true);
+
+                if (armaturesProperty.arraySize < 1)
+                    armaturesProperty.arraySize = 1;
+
+                EditorGUILayout.PropertyField(
+                    armaturesProperty.GetArrayElementAtIndex(0),
+                    new GUIContent(outfit.name));
             }
+            EditorGUI.indentLevel--;
         }
-        
+
         private void DrawAutoScaleSyncControls(bool canSync)
         {
             DrawColoredBox(SelectColor, () =>
@@ -1165,11 +1205,29 @@ namespace qsyi
                 {
                     ScanBones();
                     ApplyAvatarScalesToOutfits();
+                    _syncCompletedTime = EditorApplication.timeSinceStartup;
                 }
                 GUI.enabled = true;
+
+                const double syncShowDuration = 3.0;
+                double elapsed = EditorApplication.timeSinceStartup - _syncCompletedTime;
+                if (_syncCompletedTime >= 0 && elapsed < syncShowDuration)
+                {
+                    var syncStyle = new GUIStyle(EditorStyles.miniLabel)
+                    {
+                        alignment = TextAnchor.MiddleCenter,
+                        normal    = { textColor = new Color(0.18f, 0.58f, 0.28f) }
+                    };
+                    EditorGUILayout.LabelField("✓ 同期しました", syncStyle);
+                    Repaint();
+                }
+                else if (_syncCompletedTime >= 0 && elapsed >= syncShowDuration)
+                {
+                    _syncCompletedTime = -1.0;
+                }
             });
         }
-        
+
         private static bool Approximately(Vector3 a, Vector3 b)
         {
             return Mathf.Approximately(a.x, b.x) &&
@@ -1357,13 +1415,13 @@ namespace qsyi
                 Debug.LogError($"[qsToolBox] Sync error: {e}");
             }
         }
-        
+
         private void ScanData()
         {
             switch (_mode)
             {
                 case Mode.Material: ScanMaterials(); break;
-                case Mode.BlendShape: 
+                case Mode.BlendShape:
                     ScanSkinnedMeshRenderers();
                     ScanForCompose();
                     break;
@@ -1371,7 +1429,7 @@ namespace qsyi
                 case Mode.MenuGenerator: ScanMenuMeshEntries(); break;
             }
         }
-        
+
         private void DrawMenuGenerator()
         {
             using (new EditorGUILayout.VerticalScope())
@@ -1480,7 +1538,7 @@ namespace qsyi
 
             return _targets.FirstOrDefault(IsValidTarget);
         }
-  
+
           private string GetGeneratedMenuFolderName()
           {
             string baseName = string.IsNullOrWhiteSpace(_menuFolderName)
@@ -1662,11 +1720,11 @@ namespace qsyi
             lines.Add("メニューを生成しました");
             return string.Join("\n", lines);
         }
-        
+
         private void ScanSkinnedMeshRenderers()
         {
             _skinnedMeshRenderers.Clear();
-            
+
             foreach (var gameObject in _targets.Where(IsValidTarget))
             {
                 foreach (var smr in gameObject.GetComponentsInChildren<SkinnedMeshRenderer>(true))
@@ -1678,7 +1736,7 @@ namespace qsyi
                 }
             }
         }
-        
+
         private void ScanMaterials()
         {
             _materials.Clear();
@@ -1695,7 +1753,7 @@ namespace qsyi
             foreach (var key in _materialFoldouts.Keys.Where(k => !_materials.Contains(k)).ToList())
                 _materialFoldouts.Remove(key);
         }
-        
+
         private void ProcessRendererMaterials(Renderer renderer)
         {
             var materials = renderer.sharedMaterials;
@@ -1703,7 +1761,7 @@ namespace qsyi
             {
                 var material = materials[i];
                 if (material == null) continue;
-                
+
                 if (!_materialUsage.TryGetValue(material, out var usageList))
                 {
                     usageList = new List<(Renderer, int)>();
@@ -1713,15 +1771,15 @@ namespace qsyi
                 usageList.Add((renderer, i));
             }
         }
-        
+
         private void ScanBones()
         {
             _outfitBones.Clear();
             _avatarBones.Clear();
             CleanupOutfitArmatureEntries();
-            
+
             FindAndSetAvatarArmature();
-            
+
             if (_avatarArmature != null)
                 BuildBoneMap(_avatarArmature, _avatarBones);
 
@@ -1804,7 +1862,7 @@ namespace qsyi
             }
             return new List<Transform>();
         }
-        
+
         private void FindAndSetAvatarArmature()
         {
             if (_avatarArmature == null)
@@ -1818,13 +1876,13 @@ namespace qsyi
                 }
             }
         }
-        
+
         private void ScanForCompose()
         {
             UpdateComposeTarget();
-            
+
             _shapeNames.Clear();
-            
+
             if (_composeTarget?.sharedMesh != null)
             {
                 var mesh = _composeTarget.sharedMesh;
@@ -1832,7 +1890,7 @@ namespace qsyi
                     _shapeNames.Add(mesh.GetBlendShapeName(i));
             }
         }
-        
+
         private void UpdateComposeTarget()
         {
             if (NeedsComposeTargetUpdate())
@@ -1845,14 +1903,14 @@ namespace qsyi
                 }
             }
         }
-        
+
         private bool NeedsComposeTargetUpdate()
         {
-            return _composeTarget == null || 
-                   !_skinnedMeshRenderers.Contains(_composeTarget) || 
+            return _composeTarget == null ||
+                   !_skinnedMeshRenderers.Contains(_composeTarget) ||
                    _composeTarget.sharedMesh?.blendShapeCount == 0;
         }
-        
+
         private static void DrawColoredBox(Color _, System.Action content, params GUILayoutOption[] options)
         {
             EditorGUILayout.BeginVertical(options);
@@ -2017,7 +2075,7 @@ namespace qsyi
         }
 
         private bool IsValidTarget(GameObject target) => target != null && !target.CompareTag("EditorOnly");
-        
+
         private SkinnedMeshRenderer FindFirstValidSkinnedMeshRenderer()
         {
             foreach (var gameObject in _targets.Where(IsValidTarget))
@@ -2028,7 +2086,7 @@ namespace qsyi
             }
             return null;
         }
-        
+
         private Transform FindAvatarArmature()
         {
             foreach (var target in _targets.Where(t => t != null))
@@ -2044,7 +2102,7 @@ namespace qsyi
             }
             return null;
         }
-        
+
         private Transform FindChildByKeyword(Transform parent, string keyword)
         {
             if (parent == null) return null;
@@ -2084,7 +2142,7 @@ namespace qsyi
                 .ToArray();
             return new string(chars);
         }
-        
+
         private void BuildBoneMap(Transform armature, Dictionary<string, Transform> boneMap)
         {
             foreach (var boneName in BONE_ORDER)
@@ -2095,16 +2153,16 @@ namespace qsyi
                     foundBone = FindChildByKeyword(parent, boneName);
                 else
                     foundBone = FindChildByKeyword(armature, boneName);
-                
+
                 if (foundBone != null)
                     boneMap[boneName] = foundBone;
             }
         }
-        
+
         private void ReplaceMaterial(Material oldMaterial, Material newMaterial)
         {
             if (!_materialUsage.TryGetValue(oldMaterial, out var usageList)) return;
-            
+
             foreach (var (renderer, index) in usageList.Where(u => u.Item1 != null))
             {
                 Undo.RecordObject(renderer, "Change Material");
@@ -2116,10 +2174,10 @@ namespace qsyi
                     EditorUtility.SetDirty(renderer);
                 }
             }
-            
+
             UpdateMaterialReferences(oldMaterial, newMaterial, usageList);
         }
-        
+
         private void UpdateMaterialReferences(Material oldMaterial, Material newMaterial, List<(Renderer, int)> usageList)
         {
             _materialUsage.Remove(oldMaterial);
@@ -2131,13 +2189,13 @@ namespace qsyi
                     break;
                 }
             }
-            
+
             if (!_materialUsage.ContainsKey(newMaterial))
                 _materialUsage[newMaterial] = usageList;
             else
                 _materialUsage[newMaterial].AddRange(usageList);
         }
-        
+
     }
 }
 #endif

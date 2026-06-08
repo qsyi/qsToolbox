@@ -13,5 +13,5 @@ VRChat 内でアイテムの表示・非表示を切り替えるメニューを�
 4. **生成** ボタンを押すと [lilycalInventory](https://github.com/lilxyzw/lilycalInventory) 用のメニューがまとめて作成されます
 
 ::: tip
-VRChat 内で ON/OFF できるようにしたいアイテムだけチェックを入れると、必要なメニューだけ作れます。
+この機能は簡易的なものです。グループ分けや細かい設定など、より複雑なメニューを作りたい方は [lilycalInventory](https://github.com/lilxyzw/lilycalInventory) を直接操作するのがおすすめです。
 :::

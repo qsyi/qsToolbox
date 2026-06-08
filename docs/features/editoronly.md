@@ -6,3 +6,7 @@
 `EditorOnly` タグのオブジェクトはアップロード時に自動で除外されます。  
 作業中にオブジェクトが邪魔な場合もこのショートカットで一時的に隠せます。
 :::
+
+::: tip
+[lilEditorToolbox](https://lilxyzw.github.io/lilEditorToolbox/ja_JP/) を導入すると、`EditorOnly` 状態のオブジェクトが Hierarchy 上で視覚的にわかりやすく表示され、さらに使いやすくなります。
+:::

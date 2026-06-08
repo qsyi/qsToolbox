@@ -5,6 +5,10 @@
 
 [Modular Avatar](https://modular-avatar.nadena.dev/ja) の [**Scale Adjuster**](https://modular-avatar.nadena.dev/ja/docs/reference/scale-adjuster) にも対応しています。
 
+::: tip
+[Merge Armature](https://modular-avatar.nadena.dev/ja/docs/reference/merge-armature) と [Copy Scale Adjuster](https://github.com/Rerigferl/modular-avatar-copy-scale-adjuster) を組み合わせたやり方に慣れている方であれば、無理にこちらへ乗り換える必要はありません。これまでのやり方のままで十分だと思います！
+:::
+
 ---
 
 ## 使い方

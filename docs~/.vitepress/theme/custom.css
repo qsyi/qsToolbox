@@ -32,6 +32,11 @@
   --vp-c-text-3: #6a6a8a;
 }
 
+/* 詳細ページの本文には背景パーティクルが透けて見えないよう、不透明な背景を敷く */
+.vp-doc {
+  background-color: var(--vp-c-bg);
+}
+
 /* ホームのカードを明るくして背景とコントラストをつける */
 .VPFeature {
   background-color: #eaeaf8 !important;

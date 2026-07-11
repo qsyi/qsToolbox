@@ -8,7 +8,7 @@
 
 ## インストール
 
-- **推奨**: [VPM リポジトリ](https://qsyi.github.io/vpm-repos/) から **Add to VCC** をクリック
+- **推奨**: [インストール手順ページ](https://qsyi.github.io/qsToolbox/install) の **Add to VCC** をクリック
 - **代替**: [最新リリース](https://github.com/qsyi/qsToolbox/releases/latest) の `.unitypackage` をインポート
 
 ## 動作環境

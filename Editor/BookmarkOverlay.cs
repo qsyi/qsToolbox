@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.Overlays;
 using UnityEditor.Toolbars;
@@ -31,7 +32,10 @@ namespace qsyi
     public class BookmarkManager
     {
         private const string PrefsKey = "qsyi.FolderBookmarks";
-        
+
+        // Fix 3: 変更通知イベント
+        public static event Action OnBookmarksChanged;
+
         [SerializeField]
         private List<BookmarkData> bookmarks = new List<BookmarkData>();
 
@@ -51,6 +55,8 @@ namespace qsyi
         public void AddBookmark(string folderPath)
         {
             if (string.IsNullOrEmpty(folderPath) || !AssetDatabase.IsValidFolder(folderPath))
+                return;
+            if (folderPath == "Assets")
                 return;
 
             string guid = AssetDatabase.AssetPathToGUID(folderPath);
@@ -104,12 +110,10 @@ namespace qsyi
             {
                 EditorApplication.ExecuteMenuItem("Window/General/Project");
                 EditorUtility.FocusProjectWindow();
-                
-                EditorApplication.delayCall += () => {
+                EditorApplication.delayCall += () =>
+                {
                     Selection.activeObject = folderAsset;
-                    EditorApplication.delayCall += () => {
-                        AssetDatabase.OpenAsset(folderAsset);
-                    };
+                    AssetDatabase.OpenAsset(folderAsset);
                 };
             }
         }
@@ -118,9 +122,9 @@ namespace qsyi
         {
             UnityEngine.Object assetsFolder = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets");
             if (assetsFolder == null) return;
-            
+
             EditorUtility.FocusProjectWindow();
-            
+
             EditorApplication.delayCall += () =>
             {
                 Selection.activeObject = assetsFolder;
@@ -132,6 +136,7 @@ namespace qsyi
         {
             string json = JsonUtility.ToJson(this, true);
             EditorPrefs.SetString(PrefsKey, json);
+            OnBookmarksChanged?.Invoke(); // Fix 3
         }
 
         private static BookmarkManager LoadBookmarks()
@@ -161,8 +166,8 @@ namespace qsyi
     [Icon("d_FolderOpened Icon")]
     public class FolderNavigationOverlay : ToolbarOverlay
     {
-        FolderNavigationOverlay() : base(HomeButton.ID, BookmarkButton.ID) 
-        { 
+        FolderNavigationOverlay() : base(HomeButton.ID, BookmarkButton.ID)
+        {
             collapsedIcon = EditorGUIUtility.FindTexture("d_FolderOpened Icon");
             displayName = "フォルダナビゲーション";
         }
@@ -201,45 +206,75 @@ namespace qsyi
         public BookmarkButton()
         {
             text = "ブックマーク";
-            tooltip = "ブックマークしたフォルダに移動/フォルダをドラッグ&ドロップでブックマーク追加";
+            tooltip = "クリック: ブックマーク一覧 / D&D: フォルダをブックマーク追加";
             icon = EditorGUIUtility.FindTexture("d_Favorite Icon");
-            
+
             clicked += ShowBookmarkMenu;
-            
+
             RegisterCallback<DragUpdatedEvent>(OnDragUpdated);
             RegisterCallback<DragPerformEvent>(OnDragPerformed);
         }
 
+        static string GetCurrentProjectFolder()
+        {
+            // 1. 選択中がフォルダ
+            var activeObj = Selection.activeObject;
+            if (activeObj != null)
+            {
+                string p = AssetDatabase.GetAssetPath(activeObj);
+                if (AssetDatabase.IsValidFolder(p)) return p;
+                // 2. 選択中がファイルなら親フォルダ
+                string parent = Path.GetDirectoryName(p)?.Replace('\\', '/');
+                if (!string.IsNullOrEmpty(parent) && AssetDatabase.IsValidFolder(parent)) return parent;
+            }
+
+            // 3. Project ウィンドウで現在開いているフォルダをリフレクションで取得
+            try
+            {
+                var t = typeof(EditorWindow).Assembly.GetType("UnityEditor.ProjectBrowser");
+                if (t != null)
+                {
+                    var browsers = Resources.FindObjectsOfTypeAll(t);
+                    if (browsers.Length > 0)
+                    {
+                        var m = t.GetMethod("GetActiveFolderPath",
+                            BindingFlags.Instance | BindingFlags.NonPublic);
+                        var result = m?.Invoke(browsers[0], null) as string;
+                        if (!string.IsNullOrEmpty(result) && AssetDatabase.IsValidFolder(result))
+                            return result;
+                    }
+                }
+            }
+            catch { }
+
+            return "Assets";
+        }
+
         void OnDragUpdated(DragUpdatedEvent evt)
         {
-            if (DragAndDrop.objectReferences.Length == 1)
-            {
-                var draggedObject = DragAndDrop.objectReferences[0];
-                string assetPath = AssetDatabase.GetAssetPath(draggedObject);
-                
-                DragAndDrop.visualMode = AssetDatabase.IsValidFolder(assetPath) 
-                    ? DragAndDropVisualMode.Copy 
-                    : DragAndDropVisualMode.Rejected;
-            }
-            else
-            {
-                DragAndDrop.visualMode = DragAndDropVisualMode.Rejected;
-            }
+            bool hasFolder = DragAndDrop.objectReferences.Any(
+                o => AssetDatabase.IsValidFolder(AssetDatabase.GetAssetPath(o)));
+            DragAndDrop.visualMode = hasFolder
+                ? DragAndDropVisualMode.Copy
+                : DragAndDropVisualMode.Rejected;
         }
 
         void OnDragPerformed(DragPerformEvent evt)
         {
-            if (DragAndDrop.objectReferences.Length == 1)
+            int addedCount = 0;
+            foreach (var obj in DragAndDrop.objectReferences)
             {
-                var draggedObject = DragAndDrop.objectReferences[0];
-                string assetPath = AssetDatabase.GetAssetPath(draggedObject);
-                
-                if (AssetDatabase.IsValidFolder(assetPath))
-                {
-                    BookmarkManager.Instance.AddBookmark(assetPath);
-                    Debug.Log($"フォルダ '{Path.GetFileName(assetPath)}' をブックマークに追加しました。");
-                    DragAndDrop.AcceptDrag();
-                }
+                string assetPath = AssetDatabase.GetAssetPath(obj);
+                if (!AssetDatabase.IsValidFolder(assetPath)) continue;
+                BookmarkManager.Instance.AddBookmark(assetPath);
+                addedCount++;
+            }
+            if (addedCount > 0)
+            {
+                DragAndDrop.AcceptDrag();
+                // Fix 7: SceneView 通知
+                SceneView.lastActiveSceneView?.ShowNotification(
+                    new GUIContent($"ブックマークに追加しました ({addedCount}件)"), 1.5f);
             }
         }
 
@@ -254,20 +289,35 @@ namespace qsyi
             }
             else
             {
-                BookmarkManager.Instance.CleanupInvalidBookmarks();
-                
+                bool anyValid = false;
                 foreach (var bookmark in bookmarkList)
                 {
                     var localBookmark = bookmark;
-                    string actualPath = AssetDatabase.GUIDToAssetPath(bookmark.guid);
-                    
-                    if (!string.IsNullOrEmpty(actualPath))
-                    {
-                        menu.AddItem(new GUIContent(bookmark.name), false, () => {
-                            BookmarkManager.Instance.NavigateToBookmark(localBookmark);
-                        });
-                    }
+                    if (string.IsNullOrEmpty(AssetDatabase.GUIDToAssetPath(bookmark.guid)))
+                        continue;
+                    anyValid = true;
+                    menu.AddItem(new GUIContent(bookmark.name), false, () =>
+                        BookmarkManager.Instance.NavigateToBookmark(localBookmark));
                 }
+                if (!anyValid)
+                    menu.AddDisabledItem(new GUIContent("有効なブックマークがありません (削除済み)"));
+            }
+
+            menu.AddSeparator("");
+            string currentPath = GetCurrentProjectFolder();
+            string currentName = currentPath == "Assets" ? "Assets" : Path.GetFileName(currentPath);
+            if (currentPath == "Assets")
+            {
+                menu.AddDisabledItem(new GUIContent($"「{currentName}」はブックマークに追加できません"));
+            }
+            else
+            {
+                menu.AddItem(new GUIContent($"「{currentName}」をブックマークに追加"), false, () =>
+                {
+                    BookmarkManager.Instance.AddBookmark(currentPath);
+                    SceneView.lastActiveSceneView?.ShowNotification(
+                        new GUIContent($"追加: {currentName}"), 1.5f);
+                });
             }
 
             menu.AddSeparator("");
@@ -286,7 +336,7 @@ namespace qsyi
         [MenuItem("Assets/ブックマークに追加", true)]
         private static bool ValidateAddBookmark()
         {
-            return Selection.activeObject != null && 
+            return Selection.activeObject != null &&
                    AssetDatabase.IsValidFolder(AssetDatabase.GetAssetPath(Selection.activeObject));
         }
 
@@ -297,10 +347,7 @@ namespace qsyi
 
             string assetPath = AssetDatabase.GetAssetPath(Selection.activeObject);
             if (AssetDatabase.IsValidFolder(assetPath))
-            {
                 BookmarkManager.Instance.AddBookmark(assetPath);
-                Debug.Log($"フォルダ '{Path.GetFileName(assetPath)}' をブックマークに追加しました。");
-            }
         }
     }
 
@@ -308,6 +355,7 @@ namespace qsyi
     {
         private ReorderableList reorderableList;
         private bool isDraggingFromProject = false;
+        private Vector2 _scrollPos;
 
         [MenuItem("Window/qsyi/Bookmark Manager")]
         public static void ShowWindow()
@@ -320,12 +368,25 @@ namespace qsyi
         void OnEnable()
         {
             CreateReorderableList();
+            BookmarkManager.OnBookmarksChanged += OnBookmarksChangedExternally; // Fix 3
+        }
+
+        void OnDisable()
+        {
+            BookmarkManager.OnBookmarksChanged -= OnBookmarksChangedExternally; // Fix 3
+        }
+
+        // Fix 3: 外部変更（右クリック追加・D&D など）で自動更新
+        void OnBookmarksChangedExternally()
+        {
+            CreateReorderableList();
+            Repaint();
         }
 
         void CreateReorderableList()
         {
             var bookmarkList = BookmarkManager.Instance.Bookmarks;
-            
+
             reorderableList = new ReorderableList(bookmarkList, typeof(BookmarkData), true, true, false, true);
 
             reorderableList.drawHeaderCallback = (Rect rect) =>
@@ -336,14 +397,17 @@ namespace qsyi
             reorderableList.drawElementCallback = (Rect rect, int index, bool isActive, bool isFocused) =>
             {
                 if (index >= bookmarkList.Count) return;
-                
+
                 var bookmark = bookmarkList[index];
                 string actualPath = AssetDatabase.GUIDToAssetPath(bookmark.guid);
                 bool isValid = !string.IsNullOrEmpty(actualPath);
+                Rect elementRect = new Rect(rect.x, rect.y, rect.width, reorderableList.elementHeight);
 
                 Color originalColor = GUI.backgroundColor;
                 if (isFocused)
-                    GUI.backgroundColor = Color.cyan * 0.5f;
+                    GUI.backgroundColor = EditorGUIUtility.isProSkin
+                        ? new Color(0.24f, 0.48f, 0.90f, 0.5f)
+                        : new Color(0.24f, 0.48f, 0.90f, 0.25f);
                 else if (isActive)
                     GUI.backgroundColor = Color.white * 0.8f;
 
@@ -351,42 +415,43 @@ namespace qsyi
                 rect.height = EditorGUIUtility.singleLineHeight;
 
                 Rect iconRect = new Rect(rect.x, rect.y, 20, rect.height);
-                GUIContent icon = isValid ? 
-                    EditorGUIUtility.IconContent("d_FolderOpened Icon") : 
-                    EditorGUIUtility.IconContent("d_console.warnicon");
-                GUI.Label(iconRect, icon);
+                GUIContent folderIcon = isValid
+                    ? EditorGUIUtility.IconContent("d_FolderOpened Icon")
+                    : EditorGUIUtility.IconContent("d_console.warnicon");
+                GUI.Label(iconRect, folderIcon);
 
-                Rect nameRect = new Rect(rect.x + 25, rect.y, rect.width - 120, rect.height);
-                EditorGUI.LabelField(nameRect, bookmark.name, EditorStyles.boldLabel);
+                // 名前欄: textField スタイルで枠表示し編集可能であることを明示
+                Rect nameRect = new Rect(rect.x + 25, rect.y, rect.width - 25, rect.height);
+                if (nameRect.Contains(Event.current.mousePosition))
+                    GUI.tooltip = "クリックしてリネーム";
+                string newName = EditorGUI.DelayedTextField(nameRect, bookmark.name, EditorStyles.textField);
+                if (newName != bookmark.name && !string.IsNullOrWhiteSpace(newName))
+                {
+                    bookmark.name = newName;
+                    BookmarkManager.Instance.SaveBookmarks();
+                }
 
                 rect.y += EditorGUIUtility.singleLineHeight + 2;
-                Rect pathRect = new Rect(rect.x + 25, rect.y, rect.width - 120, rect.height);
+                Rect pathRect = new Rect(rect.x + 25, rect.y, rect.width - 25, rect.height);
                 string displayPath = isValid ? actualPath : $"{bookmark.path} (削除済み)";
                 EditorGUI.LabelField(pathRect, displayPath, EditorStyles.miniLabel);
 
-                Rect buttonRect = new Rect(rect.x + rect.width - 110, rect.y - EditorGUIUtility.singleLineHeight - 2, 50, rect.height);
-                
-                EditorGUI.BeginDisabledGroup(!isValid);
-                if (GUI.Button(buttonRect, "移動"))
-                {
-                    BookmarkManager.Instance.NavigateToBookmark(bookmark);
-                }
-                EditorGUI.EndDisabledGroup();
+                GUI.backgroundColor = originalColor;
 
-                buttonRect.x += 55;
-                if (GUI.Button(buttonRect, "削除"))
+                // カード右クリック → 削除コンテキストメニュー
+                if (Event.current.type == EventType.ContextClick && elementRect.Contains(Event.current.mousePosition))
                 {
-                    if (EditorUtility.DisplayDialog("確認", 
-                        $"ブックマーク '{bookmark.name}' を削除しますか？", 
-                        "削除", "キャンセル"))
+                    var capturedBookmark = bookmark;
+                    var menu = new GenericMenu();
+                    menu.AddItem(new GUIContent("削除"), false, () =>
                     {
-                        BookmarkManager.Instance.RemoveBookmark(bookmark);
+                        BookmarkManager.Instance.RemoveBookmark(capturedBookmark);
                         CreateReorderableList();
                         Repaint();
-                    }
+                    });
+                    menu.ShowAsContext();
+                    Event.current.Use();
                 }
-
-                GUI.backgroundColor = originalColor;
             };
 
             reorderableList.elementHeight = EditorGUIUtility.singleLineHeight * 2 + 6;
@@ -400,14 +465,8 @@ namespace qsyi
             {
                 if (list.index >= 0 && list.index < bookmarkList.Count)
                 {
-                    var bookmark = bookmarkList[list.index];
-                    if (EditorUtility.DisplayDialog("確認", 
-                        $"ブックマーク '{bookmark.name}' を削除しますか？", 
-                        "削除", "キャンセル"))
-                    {
-                        BookmarkManager.Instance.RemoveBookmark(bookmark);
-                        CreateReorderableList();
-                    }
+                    BookmarkManager.Instance.RemoveBookmark(bookmarkList[list.index]);
+                    CreateReorderableList();
                 }
             };
         }
@@ -416,11 +475,11 @@ namespace qsyi
         {
             HandleDragAndDrop();
             EditorGUILayout.Space(10);
-            
+
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("フォルダブックマーク管理", EditorStyles.boldLabel);
-            
-            if (GUILayout.Button("無効なブックマークを削除", GUILayout.Width(150)))
+
+            if (GUILayout.Button("無効を削除", GUILayout.Width(80)))
             {
                 BookmarkManager.Instance.CleanupInvalidBookmarks();
                 CreateReorderableList();
@@ -429,18 +488,18 @@ namespace qsyi
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(5);
-            EditorGUILayout.HelpBox("• ドラッグ&ドロップで順序を変更\n• プロジェクトウィンドウからフォルダをドラッグしてブックマーク追加", MessageType.Info);
+            EditorGUILayout.HelpBox("• D&D で順序変更・追加 / 名前欄クリックでリネーム\n• 右クリックまたは − ボタンで削除", MessageType.Info);
             EditorGUILayout.Space(5);
 
             if (isDraggingFromProject)
             {
                 Rect dropAreaRect = GUILayoutUtility.GetRect(0, 30, GUILayout.ExpandWidth(true));
                 EditorGUI.DrawRect(dropAreaRect, new Color(0.3f, 0.6f, 1f, 0.3f));
-                EditorGUI.LabelField(dropAreaRect, "ここにフォルダをドロップしてブックマークに追加", EditorStyles.centeredGreyMiniLabel);
+                EditorGUI.LabelField(dropAreaRect, "ここにフォルダをドロップしてブックマーク追加", EditorStyles.centeredGreyMiniLabel);
             }
 
             var bookmarkList = BookmarkManager.Instance.Bookmarks;
-            
+
             if (bookmarkList.Count == 0)
             {
                 EditorGUILayout.HelpBox("ブックマークがありません。\n\nプロジェクトウィンドウでフォルダを右クリックして「ブックマークに追加」を選択するか、\nシーンビューのブックマークボタンやこのウィンドウにフォルダをドラッグ&ドロップしてください。", MessageType.Info);
@@ -448,11 +507,11 @@ namespace qsyi
             }
 
             if (reorderableList == null || reorderableList.list != bookmarkList)
-            {
                 CreateReorderableList();
-            }
 
+            _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos);
             reorderableList.DoLayoutList();
+            EditorGUILayout.EndScrollView();
         }
 
         void HandleDragAndDrop()
@@ -465,21 +524,11 @@ namespace qsyi
                 case EventType.DragUpdated:
                     if (dropArea.Contains(evt.mousePosition))
                     {
-                        bool hasValidFolder = false;
-                        foreach (var obj in DragAndDrop.objectReferences)
-                        {
-                            string assetPath = AssetDatabase.GetAssetPath(obj);
-                            if (AssetDatabase.IsValidFolder(assetPath))
-                            {
-                                hasValidFolder = true;
-                                break;
-                            }
-                        }
-
-                        DragAndDrop.visualMode = hasValidFolder 
-                            ? DragAndDropVisualMode.Copy 
+                        bool hasValidFolder = DragAndDrop.objectReferences.Any(
+                            o => AssetDatabase.IsValidFolder(AssetDatabase.GetAssetPath(o)));
+                        DragAndDrop.visualMode = hasValidFolder
+                            ? DragAndDropVisualMode.Copy
                             : DragAndDropVisualMode.Rejected;
-                        
                         isDraggingFromProject = hasValidFolder;
                         evt.Use();
                         Repaint();
@@ -489,23 +538,20 @@ namespace qsyi
                 case EventType.DragPerform:
                     if (dropArea.Contains(evt.mousePosition))
                     {
-                        bool addedAny = false;
+                        int addedCount = 0;
                         foreach (var obj in DragAndDrop.objectReferences)
                         {
                             string assetPath = AssetDatabase.GetAssetPath(obj);
-                            if (AssetDatabase.IsValidFolder(assetPath))
-                            {
-                                BookmarkManager.Instance.AddBookmark(assetPath);
-                                Debug.Log($"フォルダ '{Path.GetFileName(assetPath)}' をブックマークに追加しました。");
-                                addedAny = true;
-                            }
+                            if (!AssetDatabase.IsValidFolder(assetPath)) continue;
+                            BookmarkManager.Instance.AddBookmark(assetPath);
+                            addedCount++;
                         }
-                        
-                        if (addedAny)
+                        if (addedCount > 0)
                         {
                             DragAndDrop.AcceptDrag();
                             CreateReorderableList();
-                            Repaint();
+                            // Fix 7: ウィンドウ内通知
+                            ShowNotification(new GUIContent($"{addedCount}件をブックマークに追加しました"), 1.5f);
                         }
                         evt.Use();
                     }
@@ -523,6 +569,9 @@ namespace qsyi
     [InitializeOnLoad]
     public static class BookmarkEditorInitializer
     {
+        // Fix 4: セッション単位で1回だけ実行
+        private const string SESSION_CLEANED_KEY = "qsyi.BookmarksCleaned";
+
         static BookmarkEditorInitializer()
         {
             EditorApplication.delayCall += Initialize;
@@ -530,6 +579,8 @@ namespace qsyi
 
         private static void Initialize()
         {
+            if (SessionState.GetBool(SESSION_CLEANED_KEY, false)) return;
+            SessionState.SetBool(SESSION_CLEANED_KEY, true);
             BookmarkManager.Instance.CleanupInvalidBookmarks();
         }
     }

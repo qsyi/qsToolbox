@@ -14,6 +14,10 @@ hero:
       link: /features/contextmenu
 
 features:
+  - title: 複数マテリアルに一括で影やリムライトを設定したい！
+    details: コピー元のマテリアルを選ぶだけで、影・リムライト・逆光ライトなどを他のマテリアルへ一括同期できます。
+    link: /features/shadowsync
+    linkText: 使い方を見る
   - title: 体の明るさが場所によってバラバラ、角度によってパーツまで消えてしまう
     details: アバターのルートに必要なコンポーネントを一括追加することで改善できます。
     link: /features/contextmenu#アバタールート用コンポーネント追加

@@ -1,0 +1,293 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 65eb519a52734274ea7cc15842afe0c5, type: 3}
+  m_Name: "\u8863\u88C5\u30FB\u9AEA"
+  m_EditorClassIdentifier: 
+  category: qsToolbox
+  props:
+  - key: _ShadowColor
+    r: 0.95283014
+    g: 0.91040325
+    b: 0.9299849
+    a: 1
+    value: 0
+  - key: _Shadow2ndColor
+    r: 0.76322055
+    g: 0.8103539
+    b: 0.9150943
+    a: 0.786
+    value: 0
+  - key: _Shadow3rdColor
+    r: 0.8018868
+    g: 0.7337212
+    b: 0.76160705
+    a: 0.837
+    value: 0
+  - key: _ShadowBorderColor
+    r: 1
+    g: 0.4229999
+    b: 0.6424862
+    a: 1
+    value: 0
+  - key: _RimShadeColor
+    r: 0.45283008
+    g: 0.37807044
+    b: 0.4279102
+    a: 1
+    value: 0
+  - key: _RimColor
+    r: 0.7830188
+    g: 0.7297403
+    b: 0.7406382
+    a: 1
+    value: 0
+  - key: _RimIndirColor
+    r: 1
+    g: 1
+    b: 1
+    a: 1
+    value: 0
+  - key: _UseShadow
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _ShadowStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _ShadowBorder
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.686
+  - key: _ShadowBlur
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.187
+  - key: _ShadowNormalStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.3
+  - key: _ShadowReceive
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _Shadow2ndBorder
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.538
+  - key: _Shadow2ndBlur
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.218
+  - key: _Shadow2ndNormalStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.3
+  - key: _Shadow2ndReceive
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _Shadow3rdBorder
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.375
+  - key: _Shadow3rdBlur
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.407
+  - key: _Shadow3rdNormalStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _Shadow3rdReceive
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _ShadowBorderRange
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.08
+  - key: _ShadowMainStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.318
+  - key: _ShadowEnvStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.5
+  - key: _UseRimShade
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimShadeNormalStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimShadeBorder
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.227
+  - key: _RimShadeBlur
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.611
+  - key: _RimShadeFresnelPower
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 2
+  - key: _UseRim
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimBorder
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0
+  - key: _RimBlur
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimFresnelPower
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 2.1
+  - key: _RimEnableLighting
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimMainStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimShadowMask
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.4
+  - key: _RimBackfaceMask
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimDirStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0
+  - key: _RimDirRange
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0
+  - key: _RimIndirRange
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0
+  - key: _RimIndirBorder
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.5
+  - key: _RimIndirBlur
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.1
+  - key: _RimNormalStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 0.486
+  - key: _RimVRParallaxStrength
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimApplyTransparency
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  - key: _RimBlendMode
+    r: 0
+    g: 0
+    b: 0
+    a: 0
+    value: 1
+  enabledParams: []

@@ -106,22 +106,23 @@ namespace qsyi
             {
                 string path = $"Packages/{PACKAGE_NAME}/package.json";
                 if (!File.Exists(path)) return "";
-                return ExtractJsonString(File.ReadAllText(path), "version");
+                var pkg = JsonUtility.FromJson<PackageJson>(File.ReadAllText(path));
+                return pkg?.version ?? "";
             }
             catch { return ""; }
         }
 
-        private static string ExtractTagName(string json) =>
-            ExtractJsonString(json, "tag_name");
+        [Serializable] private class GitHubRelease { public string tag_name; }
+        [Serializable] private class PackageJson    { public string version; }
 
-        private static string ExtractJsonString(string json, string key)
+        private static string ExtractTagName(string json)
         {
-            int idx = json.IndexOf($"\"{key}\"", StringComparison.Ordinal);
-            if (idx < 0) return "";
-            int colon = json.IndexOf(':', idx);
-            int start = json.IndexOf('"', colon + 1) + 1;
-            int end   = json.IndexOf('"', start);
-            return start > 0 && end > start ? json.Substring(start, end - start) : "";
+            try
+            {
+                var release = JsonUtility.FromJson<GitHubRelease>(json);
+                return release?.tag_name ?? "";
+            }
+            catch { return ""; }
         }
     }
 }

@@ -2,7 +2,7 @@
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
-using UnityEditorInternal;
+using System;
 using System.Collections.Generic;
 using VRC.SDK3.Avatars.Components;
 using nadena.dev.modular_avatar.core;
@@ -10,79 +10,70 @@ using jp.lilxyzw.lilycalinventory.runtime;
 using System.Reflection;
 using System.IO;
 using System.Linq;
+using UnityEngine.UIElements;
+using UnityEditor.UIElements;
 
 namespace qsyi
 {
-    internal class QsToolBox : EditorWindow
+    internal partial class QsToolBox : EditorWindow
     {
-        private enum Mode { Material, BlendShape, Scale, MenuGenerator }
+        private enum Mode { Material, BlendShape, Scale, ShadowSync, MenuGenerator }
 
         [SerializeField] private List<GameObject> _targets = new List<GameObject>();
         [SerializeField] private Transform _avatarArmature;
         [SerializeField] private List<OutfitArmatureEntry> _outfitArmatureEntries = new List<OutfitArmatureEntry>();
         [SerializeField] private bool _autoSyncPosition;
         [SerializeField] private bool _autoSyncRotation;
-        [SerializeField] private bool _menuPreviewEnabled = true;
         [SerializeField] private List<MenuMeshEntry> _menuMeshEntries = new List<MenuMeshEntry>();
 
         private Mode _mode = Mode.Material;
-        private Vector2 _scrollPosition;
-        private Vector2 _composeShapeScroll;
-        private Vector2 _shapeListScroll;
-        private Vector2 _scaleStatusScroll;
-        private Vector2 _menuRendererScroll;
 
         private readonly List<SkinnedMeshRenderer> _skinnedMeshRenderers = new List<SkinnedMeshRenderer>();
         private readonly List<Material> _materials = new List<Material>();
         private readonly Dictionary<Material, List<(Renderer renderer, int slot)>> _materialUsage = new Dictionary<Material, List<(Renderer, int)>>();
         private readonly Dictionary<GameObject, Dictionary<string, Transform>> _outfitBones = new Dictionary<GameObject, Dictionary<string, Transform>>();
         private readonly Dictionary<string, Transform> _avatarBones = new Dictionary<string, Transform>();
-        private SkinnedMeshRenderer _composeTarget;
-        private string _baseShapeName = "";
-        private readonly List<(string name, float weight)> _composeShapes = new List<(string, float)>();
-        private string _composeSearchText = "";
-        private readonly List<string> _shapeNames = new List<string>();
-        private string _newShapeName = "";
-        private bool _overwriteShape = true;
-        private string _menuFolderName = "";
+        private int? _lastMaterialHash;
+        private int? _lastSmrHash;
+        private int? _lastBonesHash;
 
         private SerializedObject _serializedObject;
         private SerializedProperty _targetsProperty;
         private SerializedProperty _armatureProperty;
         private SerializedProperty _outfitArmatureEntriesProperty;
-        private SerializedProperty _menuMeshEntriesProperty;
-        private ReorderableList _menuMeshEntriesList;
-        private int _targetHash = -1;
         private bool _isDirty = true;
-        private readonly Dictionary<GameObject, bool> _menuPreviewOriginalStates = new Dictionary<GameObject, bool>();
         private static FieldInfo _adjustChildPositionsField;
         private static bool _adjustChildPositionsResolved;
-        private static GUIStyle _tabLeft, _tabMid, _tabRight, _tabScan;
-        private static GUIStyle _tabLeftSel, _tabMidSel, _tabRightSel;
-        private static GUIStyle _dimBoneStyle;
-        private static GUIStyle _versionBadgeStyle;
-        private double _syncCompletedTime = -1.0;
 
-        private const float BUTTON_WIDTH_SMALL = 20f;
-        private const float BUTTON_WIDTH_MEDIUM = 60f;
-        private const float BUTTON_WIDTH_LARGE = 80f;
-        private const float SCROLL_HEIGHT = 300f;
-        private const float EXECUTE_BUTTON_HEIGHT = 40f;
-        private const float VIEW_WIDTH_RATIO = 0.5f;
+        // UI Toolkit
+        private VisualElement[] _tabElements;
+        private VisualElement[] _tabAccents;
+        private Label _versionLabel;
+        private VisualElement _targetChipsWrap;
+        private VisualElement _targetChipsSlot;
+        private const float TARGET_AREA_COLLAPSED_HEIGHT = 28f;
+        private int _lastTargetHash = -1;
+        private bool _targetAreaExpanded = false;
+        private bool _targetNeedsFoldout = false;
+        private int  _targetRebuildId   = 0;
+        private Label _targetFoldoutArrow;
+        private Label _targetTitleLabel;
+        private VisualElement _materialPane;
+        private ScrollView _materialScrollView;
+        private VisualElement _menuPane;
 
-        private static Color HeaderColor  => EditorGUIUtility.isProSkin ? new Color(0.26f, 0.28f, 0.32f, 1f) : new Color(0.80f, 0.86f, 0.93f, 1f);
-        private static Color ContentColor => EditorGUIUtility.isProSkin ? new Color(0.22f, 0.22f, 0.23f, 1f) : new Color(0.86f, 0.86f, 0.87f, 1f);
-        private static Color SelectColor  => EditorGUIUtility.isProSkin ? new Color(0.21f, 0.30f, 0.43f, 1f) : new Color(0.74f, 0.87f, 0.99f, 1f);
-        private static Color TargetColor  => EditorGUIUtility.isProSkin ? new Color(0.28f, 0.26f, 0.20f, 1f) : new Color(0.96f, 0.93f, 0.82f, 1f);
-        private static Color BaseColor    => EditorGUIUtility.isProSkin ? new Color(0.22f, 0.26f, 0.23f, 1f) : new Color(0.85f, 0.92f, 0.86f, 1f);
-        private static Color AccentColor  => new Color(0.30f, 0.60f, 1.00f, 1f);
+        private static readonly Color AccentColor       = new Color(0.30f, 0.60f, 1.00f, 1f);
+        private static Color PaneBorderColor   => EditorGUIUtility.isProSkin ? new Color(0.18f, 0.18f, 0.20f) : new Color(0.70f, 0.70f, 0.72f);
+        private static Color ChromeBorderColor => EditorGUIUtility.isProSkin ? new Color(0.13f, 0.13f, 0.13f) : new Color(0.60f, 0.60f, 0.60f);
+        private static Color TextColor         => EditorGUIUtility.isProSkin ? new Color(0.85f, 0.85f, 0.85f) : new Color(0.15f, 0.15f, 0.15f);
+        private static readonly Color DimColor = new Color(0.50f, 0.50f, 0.50f);
 
-        private static readonly string[] TAB_NAMES = { "マテリアル", "ブレンドシェイプ", "スケール", "メニュー生成" };
-        private static readonly GUIContent[] TAB_TOOLTIPS = {
-            new GUIContent("マテリアル", "探索対象のマテリアルを置換できます"),
-            new GUIContent("ブレンドシェイプ", "探索対象のブレンドシェイプを表示・編集します"),
-            new GUIContent("スケール", "ModularAvatarのスケール調整機能を使用します"),
-            new GUIContent("メニュー生成", "lilycalInventory用の簡易メニューを生成します")
+        private static readonly (string icon, string label, string tooltip)[] UITOOLKIT_TABS = {
+            ("◧", "マテリアル",   "探索対象のマテリアルを置換できます"),
+            ("◈", "シェイプキー", "探索対象のブレンドシェイプを表示・編集します"),
+            ("⊞", "スケール",     "ModularAvatarのスケール調整機能を使用します"),
+            ("◑", "影同期",       "lilToonの影設定を一括同期します"),
+            ("☰", "メニュー生成", "lilycalInventory用の簡易メニューを生成します"),
         };
         private static readonly string[] BONE_ORDER = {
             "Hips", "Spine", "Chest", "Breast L", "Breast R", "Neck", "Head",
@@ -103,22 +94,26 @@ namespace qsyi
             ["Hand L"] = "Lower Arm L", ["Hand R"] = "Lower Arm R",
             ["Breast L"] = "Chest", ["Breast R"] = "Chest"
         };
-                private readonly Dictionary<Material, bool> _materialFoldouts = new Dictionary<Material, bool>();
 
-        [System.Serializable]
-        private class OutfitArmatureEntry
+        private static readonly Dictionary<string, string[]> BONE_ALIASES = new Dictionary<string, string[]>
         {
-            public GameObject Outfit;
-            public List<Transform> Armatures = new List<Transform>();
-            [HideInInspector] public bool AutoAssigned;
-        }
-
-        [System.Serializable]
-        private class MenuMeshEntry
-        {
-            public SkinnedMeshRenderer Renderer;
-            public bool Include;
-        }
+            ["Butt L"]      = new[] { "hipsl",        "hipl"         },
+            ["Butt R"]      = new[] { "hipsr",        "hipr"         },
+            ["Upper Leg L"] = new[] { "leftleg",      "leftthigh",   "legl",    "thighl"   },
+            ["Upper Leg R"] = new[] { "rightleg",     "rightthigh",  "legr",    "thighr"   },
+            ["Lower Leg L"] = new[] { "leftknee",     "kneeleft",    "kneeleftl"            },
+            ["Lower Leg R"] = new[] { "rightknee",    "kneeright",   "kneerightl"           },
+            ["Foot L"]      = new[] { "leftankle",    "ankleleft",   "anklel"               },
+            ["Foot R"]      = new[] { "rightankle",   "ankleright",  "ankler"               },
+            ["Shoulder L"]  = new[] { "leftshoulder", "shoulderleft"                        },
+            ["Shoulder R"]  = new[] { "rightshoulder","shoulderright"                       },
+            ["Upper Arm L"] = new[] { "leftarm",      "armleft",     "arml"                 },
+            ["Upper Arm R"] = new[] { "rightarm",     "armright",    "armr"                 },
+            ["Lower Arm L"] = new[] { "leftelbow",    "elbowleft",   "elbowl"               },
+            ["Lower Arm R"] = new[] { "rightelbow",   "elbowright",  "elbowr"               },
+            ["Hand L"]      = new[] { "leftwrist",    "wristleft",   "wristl"               },
+            ["Hand R"]      = new[] { "rightwrist",   "wristright",  "wristr"               },
+        };
 
         [MenuItem("Tools/qs/ツールボックス %q")]
         public static void ShowWindow()
@@ -140,14 +135,48 @@ namespace qsyi
         private void OnEnable()
         {
             InitializeSerializedObject();
-            EditorApplication.hierarchyChanged += OnHierarchyChanged;
+            EditorApplication.hierarchyChanged    += OnHierarchyChanged;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            Undo.undoRedoPerformed += OnUndoRedo;
             ScanData();
         }
 
         private void OnDisable()
         {
-            RestoreMenuPreviewState();
-            EditorApplication.hierarchyChanged -= OnHierarchyChanged;
+            EditorApplication.hierarchyChanged    -= OnHierarchyChanged;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            Undo.undoRedoPerformed -= OnUndoRedo;
+            RestoreMenuPreview();
+        }
+
+        private void OnPlayModeStateChanged(PlayModeStateChange _)
+        {
+            if (_scaleSyncButton == null) return;
+            _scaleSyncButton.SetEnabled(!EditorApplication.isPlaying);
+        }
+
+        private void OnUndoRedo()
+        {
+            // Undo/Redo でレンダラーのマテリアルや Transform が戻るため、キャッシュを無効化して再スキャンする
+            InvalidateContentCaches();
+            ScanData();
+            RebuildScaleBoneDetail();
+        }
+
+        // ターゲットやコンテンツが変わったときに、各モードの変更検知ハッシュを無効化して次回スキャンを強制する
+        private void InvalidateContentCaches()
+        {
+            _lastMaterialHash = null;
+            _lastSmrHash = null;
+            _lastBonesHash = null;
+        }
+
+        // 各Scan*系メソッドの「ハッシュが前回と同じなら変化なし」判定を共通化する
+        private static bool HashChanged(int newHash, ref int? cache)
+        {
+            if (cache == newHash) return false;
+            cache = newHash;
+            return true;
         }
 
         private void InitializeSerializedObject()
@@ -156,135 +185,57 @@ namespace qsyi
             _targetsProperty = _serializedObject.FindProperty("_targets");
             _armatureProperty = _serializedObject.FindProperty("_avatarArmature");
             _outfitArmatureEntriesProperty = _serializedObject.FindProperty("_outfitArmatureEntries");
-            _menuMeshEntriesProperty = _serializedObject.FindProperty("_menuMeshEntries");
-            _targetsProperty.isExpanded = true;
-            _outfitArmatureEntriesProperty.isExpanded = false;
-            InitializeMenuMeshEntriesList();
         }
 
-        private void InitializeMenuMeshEntriesList()
+        private void OnHierarchyChanged() { _isDirty = true; }
+
+        public void CreateGUI()
         {
-            _menuMeshEntriesList = new ReorderableList(_serializedObject, _menuMeshEntriesProperty, false, true, true, true);
-            _menuMeshEntriesList.drawHeaderCallback = rect =>
-            {
-                EditorGUI.LabelField(rect, "生成対象");
-            };
-            _menuMeshEntriesList.drawElementCallback = (rect, index, isActive, isFocused) =>
-            {
-                var element = _menuMeshEntriesProperty.GetArrayElementAtIndex(index);
-                var includeProperty = element.FindPropertyRelative("Include");
-                var rendererProperty = element.FindPropertyRelative("Renderer");
+            var root = rootVisualElement;
+            root.style.flexDirection = FlexDirection.Column;
 
-                rect.y += 2f;
-                var toggleRect = new Rect(rect.x, rect.y, 18f, EditorGUIUtility.singleLineHeight);
-                var fieldRect = new Rect(rect.x + 22f, rect.y, rect.width - 22f, EditorGUIUtility.singleLineHeight);
+            root.Add(BuildHeader());
+            root.Add(BuildTargetArea());
+            root.Add(BuildTabBar());
 
-                includeProperty.boolValue = EditorGUI.Toggle(toggleRect, includeProperty.boolValue);
-                EditorGUI.PropertyField(fieldRect, rendererProperty, GUIContent.none);
-            };
-            _menuMeshEntriesList.elementHeight = EditorGUIUtility.singleLineHeight + 4f;
-            _menuMeshEntriesList.onAddCallback = list =>
-            {
-                int index = _menuMeshEntriesProperty.arraySize;
-                _menuMeshEntriesProperty.arraySize++;
-                var element = _menuMeshEntriesProperty.GetArrayElementAtIndex(index);
-                element.FindPropertyRelative("Renderer").objectReferenceValue = null;
-                element.FindPropertyRelative("Include").boolValue = false;
-                _serializedObject.ApplyModifiedProperties();
-            };
-        }
+            bool startMaterial = _mode == Mode.Material;
+            bool startMenu     = _mode == Mode.MenuGenerator;
 
-        private void OnHierarchyChanged() => _isDirty = true;
+            _materialPane = BuildMaterialPane();
+            _materialPane.style.flexGrow  = 1;
+            _materialPane.style.minHeight = 0;
+            _materialPane.style.display   = startMaterial ? DisplayStyle.Flex : DisplayStyle.None;
+            root.Add(_materialPane);
 
-        private void OnGUI()
-        {
-            CheckForTargetChanges();
-            DrawMainTabs();
+            _menuPane = BuildMenuPane();
+            _menuPane.style.flexGrow  = 1;
+            _menuPane.style.minHeight = 0;
+            _menuPane.style.display   = startMenu ? DisplayStyle.Flex : DisplayStyle.None;
+            root.Add(_menuPane);
 
-            EditorGUILayout.Space();
+            bool startBlend = _mode == Mode.BlendShape;
+            _blendShapePane = BuildBlendShapePane();
+            _blendShapePane.style.flexGrow  = 1;
+            _blendShapePane.style.minHeight = 0;
+            _blendShapePane.style.display   = startBlend ? DisplayStyle.Flex : DisplayStyle.None;
+            root.Add(_blendShapePane);
 
-            switch (_mode)
-            {
-                case Mode.Material:
-                    DrawMaterialReplace();
-                    break;
-                case Mode.BlendShape:
-                    DrawBlendShapeCompose();
-                    break;
-                case Mode.Scale: DrawScaleAdjustment(); break;
-                case Mode.MenuGenerator: DrawMenuGenerator(); break;
-            }
-        }
+            bool startScale = _mode == Mode.Scale;
+            _scalePane = BuildScalePane();
+            _scalePane.style.flexGrow  = 1;
+            _scalePane.style.minHeight = 0;
+            _scalePane.style.display   = startScale ? DisplayStyle.Flex : DisplayStyle.None;
+            root.Add(_scalePane);
 
-        private void CheckForTargetChanges()
-        {
-            DrawColoredBox(TargetColor, () =>
-            {
-                _serializedObject.Update();
+            bool startShadowSync = _mode == Mode.ShadowSync;
+            _shadowSyncPane = BuildShadowSyncPane();
+            _shadowSyncPane.style.flexGrow  = 1;
+            _shadowSyncPane.style.minHeight = 0;
+            _shadowSyncPane.style.display   = startShadowSync ? DisplayStyle.Flex : DisplayStyle.None;
+            root.Add(_shadowSyncPane);
 
-                // 探索対象ラベル + バージョンバッジを同一行に
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("探索対象", EditorStyles.boldLabel);
-
-                if (_versionBadgeStyle == null)
-                    _versionBadgeStyle = new GUIStyle(EditorStyles.miniLabel)
-                    {
-                        fontStyle = FontStyle.Normal,
-                        alignment = TextAnchor.MiddleLeft,
-                        padding   = new RectOffset(8, 8, 2, 2),
-                    };
-
-                if (QsVersionChecker.HasUpdate || QsVersionChecker.CheckComplete)
-                {
-                    Color accentColor = QsVersionChecker.HasUpdate
-                        ? new Color(0.80f, 0.42f, 0.08f)
-                        : new Color(0.18f, 0.58f, 0.28f);
-                    _versionBadgeStyle.normal.textColor = accentColor;
-
-                    var badgeContent = new GUIContent(QsVersionChecker.HasUpdate
-                        ? $"↑ v{QsVersionChecker.LatestVersion} が公開されています"
-                        : $"✓ v{QsVersionChecker.CurrentVersion} 最新バージョンです");
-
-                    float lineH = EditorGUIUtility.singleLineHeight;
-                    Vector2 badgeSize = _versionBadgeStyle.CalcSize(badgeContent);
-                    Rect badgeRect = GUILayoutUtility.GetRect(badgeSize.x + 4f, lineH, GUILayout.ExpandWidth(false));
-                    if (Event.current.type == EventType.Repaint)
-                    {
-                        EditorGUI.DrawRect(badgeRect, new Color(accentColor.r, accentColor.g, accentColor.b, 0.10f));
-                        EditorGUI.DrawRect(new Rect(badgeRect.x, badgeRect.y, 3f, badgeRect.height), accentColor);
-                    }
-                    GUI.Label(badgeRect, badgeContent, _versionBadgeStyle);
-                }
-                else if (QsVersionChecker.IsFetching)
-                {
-                    Color dimColor = EditorGUIUtility.isProSkin
-                        ? new Color(0.50f, 0.50f, 0.50f)
-                        : new Color(0.45f, 0.45f, 0.45f);
-                    _versionBadgeStyle.normal.textColor = dimColor;
-
-                    var fetchingContent = new GUIContent("確認中…");
-                    float lineH = EditorGUIUtility.singleLineHeight;
-                    Vector2 badgeSize = _versionBadgeStyle.CalcSize(fetchingContent);
-                    Rect badgeRect = GUILayoutUtility.GetRect(badgeSize.x + 4f, lineH, GUILayout.ExpandWidth(false));
-                    GUI.Label(badgeRect, fetchingContent, _versionBadgeStyle);
-                    Repaint();
-                }
-                EditorGUILayout.EndHorizontal();
-
-                EditorGUI.BeginChangeCheck();
-                EditorGUILayout.PropertyField(_targetsProperty, GUIContent.none, true);
-                bool changed = EditorGUI.EndChangeCheck();
-
-                _serializedObject.ApplyModifiedProperties();
-
-                int currentHash = GetTargetHash();
-                if (changed || _isDirty || currentHash != _targetHash)
-                {
-                    ScanData();
-                    _targetHash = currentHash;
-                    _isDirty = false;
-                }
-            });
+            root.schedule.Execute(UpdateVersionLabel).Every(500);
+            root.schedule.Execute(PollTargetChanges).Every(150);
         }
 
         private int GetTargetHash()
@@ -296,1432 +247,30 @@ namespace qsyi
             return hash;
         }
 
-        private void DrawMainTabs()
-        {
-            DrawSeparator();
-            EditorGUILayout.Space(4);
-            DrawTabButtons(TAB_NAMES, TAB_TOOLTIPS, (int)_mode, (index) =>
-            {
-                if (_mode == Mode.MenuGenerator && _mode != (Mode)index)
-                    RestoreMenuPreviewState();
-
-                _mode = (Mode)index;
-                GUI.FocusControl(null);
-                ScanData();
-                _scrollPosition = Vector2.zero;
-            }, true);
-        }
-
-        private void DrawTabButtons(string[] tabNames, GUIContent[] tooltips, int selectedIndex, System.Action<int> onTabSelected, bool showScanButton)
-        {
-            const float tabHeight = 28f;
-            const float accentH   = 3f;
-
-            if (_tabLeft == null)
-            {
-                _tabLeft    = new GUIStyle(EditorStyles.miniButtonLeft)  { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Normal };
-                _tabMid     = new GUIStyle(EditorStyles.miniButtonMid)   { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Normal };
-                _tabRight   = new GUIStyle(EditorStyles.miniButtonRight) { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Normal };
-                _tabLeftSel  = new GUIStyle(EditorStyles.miniButtonLeft)  { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Bold };
-                _tabMidSel   = new GUIStyle(EditorStyles.miniButtonMid)   { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Bold };
-                _tabRightSel = new GUIStyle(EditorStyles.miniButtonRight) { fixedHeight = tabHeight, fontSize = 11, fontStyle = FontStyle.Bold };
-                _tabScan    = new GUIStyle(EditorStyles.miniButton) { fixedHeight = tabHeight, fontSize = 14 };
-            }
-
-            var originalBg = GUI.backgroundColor;
-            float totalWidth = EditorGUIUtility.currentViewWidth - (showScanButton ? 64f : 8f);
-            float buttonWidth = totalWidth / tabNames.Length;
-
-            EditorGUILayout.BeginHorizontal();
-            for (int i = 0; i < tabNames.Length; i++)
-            {
-                bool isSelected = selectedIndex == i;
-                bool isLast = i == tabNames.Length - 1;
-                GUI.backgroundColor = isSelected ? new Color(0.82f, 0.88f, 1f) : originalBg;
-
-                GUIStyle style = isSelected
-                    ? (i == 0 ? _tabLeftSel : isLast ? _tabRightSel : _tabMidSel)
-                    : (i == 0 ? _tabLeft    : isLast ? _tabRight    : _tabMid);
-
-                if (GUILayout.Button(tooltips[i], style, GUILayout.Width(buttonWidth)) && !isSelected)
-                    onTabSelected(i);
-
-                if (isSelected && Event.current.type == EventType.Repaint)
-                {
-                    var r = GUILayoutUtility.GetLastRect();
-                    EditorGUI.DrawRect(new Rect(r.x, r.yMax - accentH, r.width, accentH), AccentColor);
-                }
-            }
-
-            GUI.backgroundColor = originalBg;
-
-            if (showScanButton)
-            {
-                if (GUILayout.Button(new GUIContent("↺", "再スキャン"), _tabScan, GUILayout.Width(54f)))
-                {
-                    ScanData();
-                    Repaint();
-                }
-            }
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private GUIStyle GetButtonStyle(int index, int totalCount)
-        {
-            if (index == 0) return EditorStyles.miniButtonLeft;
-            if (index == totalCount - 1) return EditorStyles.miniButtonRight;
-            return EditorStyles.miniButtonMid;
-        }
-
-        private void DrawMaterialReplace()
-        {
-            DrawColoredBox(HeaderColor, () =>
-            {
-                EditorGUILayout.LabelField("マテリアル置換", EditorStyles.boldLabel);
-                EditorGUILayout.HelpBox("マテリアルを直接ドラッグ＆ドロップで置換", MessageType.Info);
-            });
-
-            if (_materials.Count == 0)
-            {
-                EditorGUILayout.HelpBox("マテリアルが見つかりません。", MessageType.Info);
-                return;
-            }
-
-            _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
-
-            foreach (var material in _materials)
-            {
-                EditorGUILayout.BeginHorizontal();
-
-                var preview = AssetPreview.GetAssetPreview(material);
-                if (preview == null)
-                {
-                    Repaint();
-                    preview = AssetPreview.GetMiniThumbnail(material);
-                }
-                if (preview != null)
-                    GUILayout.Label(preview, GUILayout.Width(48f), GUILayout.Height(48f));
-
-                EditorGUILayout.BeginVertical();
-
-                EditorGUI.BeginChangeCheck();
-                var newMaterial = (Material)EditorGUILayout.ObjectField(material, typeof(Material), false);
-                if (EditorGUI.EndChangeCheck() && newMaterial != null && newMaterial != material)
-                    ReplaceMaterial(material, newMaterial);
-
-                if (_materialUsage.TryGetValue(material, out var usages))
-                {
-                    if (!_materialFoldouts.ContainsKey(material))
-                        _materialFoldouts[material] = false;
-
-                    _materialFoldouts[material] = EditorGUILayout.Foldout(
-                        _materialFoldouts[material],
-                        $"使用箇所  {usages.Count} 件",
-                        true,
-                        EditorStyles.foldout);
-
-                    if (_materialFoldouts[material])
-                    {
-                        EditorGUI.indentLevel++;
-                        foreach (var (renderer, _) in usages)
-                        {
-                            if (renderer == null) continue;
-                            GUI.enabled = false;
-                            EditorGUILayout.ObjectField(renderer, typeof(Renderer), true);
-                            GUI.enabled = true;
-                        }
-                        EditorGUI.indentLevel--;
-                    }
-                }
-
-                EditorGUILayout.EndVertical();
-                EditorGUILayout.EndHorizontal();
-
-                DrawSeparator();
-            }
-
-            EditorGUILayout.EndScrollView();
-        }
-
-        private void DrawBlendShapeCompose()
-        {
-            using (new EditorGUILayout.VerticalScope())
-            {
-                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition, GUILayout.ExpandHeight(true));
-
-                DrawComposeTargetSelection();
-                DrawBaseShapeSelection();
-                DrawComposeShapeAndListSelection();
-
-                EditorGUILayout.EndScrollView();
-
-                DrawComposeExecuteButton();
-            }
-        }
-
-        private void DrawComposeTargetSelection()
-        {
-            DrawColoredBox(HeaderColor, () =>
-            {
-                EditorGUILayout.LabelField("シェイプキー合成", EditorStyles.boldLabel);
-
-                EditorGUI.BeginChangeCheck();
-                _composeTarget = EditorGUILayout.ObjectField(
-                    new GUIContent("対象メッシュ", "合成対象のSkinnedMeshRenderer"),
-                    _composeTarget, typeof(SkinnedMeshRenderer), true) as SkinnedMeshRenderer;
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    ResetComposeData();
-                    ScanForCompose();
-                }
-            });
-        }
-
-        private void DrawBaseShapeSelection()
-        {
-            DrawColoredBox(BaseColor, () =>
-            {
-                EditorGUILayout.LabelField("ベースシェイプキー", EditorStyles.boldLabel);
-                DrawBaseShapeInfo();
-                DrawOverwriteSettings();
-                DrawNewShapeNameField();
-            });
-        }
-
-        private void DrawBaseShapeInfo()
-        {
-            if (string.IsNullOrEmpty(_baseShapeName))
-            {
-                EditorGUILayout.HelpBox("右の一覧から「ベース」を押して選択してください。", MessageType.Info);
-            }
-            else
-            {
-                var nameStyle = new GUIStyle(EditorStyles.boldLabel)
-                {
-                    fontSize = 13,
-                    alignment = TextAnchor.MiddleLeft,
-                };
-                using (new EditorGUILayout.HorizontalScope(GUILayout.Height(32f)))
-                {
-                    EditorGUILayout.LabelField("✓", nameStyle, GUILayout.Width(18f));
-                    EditorGUILayout.LabelField(new GUIContent(_baseShapeName, _baseShapeName), nameStyle);
-                    if (GUILayout.Button("クリア", EditorStyles.miniButton, GUILayout.Width(BUTTON_WIDTH_MEDIUM), GUILayout.Height(32f)))
-                    {
-                        _baseShapeName = "";
-                        if (_overwriteShape)
-                            _newShapeName = "";
-                    }
-                }
-            }
-        }
-
-        private void DrawOverwriteSettings()
-        {
-            EditorGUI.BeginChangeCheck();
-            _overwriteShape = EditorGUILayout.Toggle(new GUIContent("シェイプキーを上書きする", "チェックを入れるとベースシェイプキーを上書きします"), _overwriteShape);
-
-            if (EditorGUI.EndChangeCheck())
-            {
-                if (_overwriteShape && !string.IsNullOrEmpty(_baseShapeName))
-                    _newShapeName = _baseShapeName;
-                else if (!_overwriteShape)
-                    _newShapeName = string.IsNullOrEmpty(_baseShapeName) ? "" : _baseShapeName + "_合成";
-            }
-        }
-
-        private void DrawNewShapeNameField()
-        {
-            if (!_overwriteShape)
-            {
-                _newShapeName = EditorGUILayout.TextField(new GUIContent("新しい名前", "新しいシェイプキー名"), _newShapeName);
-            }
-            else
-            {
-                EditorGUILayout.LabelField("上書き対象", string.IsNullOrEmpty(_baseShapeName) ? "未選択" : _baseShapeName);
-            }
-        }
-
-        private void DrawComposeShapeAndListSelection()
-        {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                DrawComposeShapeSelection();
-
-                var lineRect = GUILayoutUtility.GetRect(1f, 1f, GUILayout.ExpandHeight(true), GUILayout.Width(1f));
-                if (Event.current.type == EventType.Repaint)
-                    EditorGUI.DrawRect(lineRect, EditorGUIUtility.isProSkin ? new Color(0.13f, 0.13f, 0.13f) : new Color(0.60f, 0.60f, 0.60f));
-
-                DrawShapeSelectionList();
-            }
-        }
-
-        private void DrawComposeShapeSelection()
-        {
-            using (new EditorGUILayout.VerticalScope(GUILayout.Width(EditorGUIUtility.currentViewWidth * VIEW_WIDTH_RATIO)))
-            {
-                DrawColoredBox(SelectColor, () =>
-                {
-                    EditorGUILayout.LabelField("合成するシェイプキー", EditorStyles.boldLabel);
-
-                    if (_composeShapes.Count == 0 && string.IsNullOrEmpty(_baseShapeName))
-                    {
-                        EditorGUILayout.LabelField("右の一覧から「追加」ボタンを押して選択");
-                    }
-                    else
-                    {
-                        _composeShapeScroll = EditorGUILayout.BeginScrollView(_composeShapeScroll, GUILayout.Height(SCROLL_HEIGHT));
-                        DrawComposeShapeList();
-                        EditorGUILayout.EndScrollView();
-                    }
-                });
-            }
-        }
-
-        private void DrawComposeShapeList()
-        {
-            bool hasBase = !string.IsNullOrEmpty(_baseShapeName);
-
-            if (hasBase)
-            {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    GUILayout.Space(BUTTON_WIDTH_SMALL + 4f);
-                    EditorGUILayout.LabelField(new GUIContent(_baseShapeName, _baseShapeName), GUILayout.Width(120));
-                    GUI.enabled = false;
-                    EditorGUILayout.Slider(100f, -100f, 100f);
-                    GUI.enabled = true;
-                }
-            }
-
-            for (int i = 0; i < _composeShapes.Count; i++)
-            {
-                if (i > 0 || hasBase)
-                    DrawPlusSeparator();
-
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    if (GUILayout.Button("×", GUILayout.Width(BUTTON_WIDTH_SMALL)))
-                    {
-                        _composeShapes.RemoveAt(i);
-                        i--;
-                        continue;
-                    }
-
-                    var item = _composeShapes[i];
-                    EditorGUILayout.LabelField(new GUIContent(item.name, item.name), GUILayout.Width(120));
-
-                    float weight = EditorGUILayout.Slider(item.weight, -100f, 100f);
-                    if (!Mathf.Approximately(weight, item.weight))
-                        _composeShapes[i] = (item.name, weight);
-                }
-            }
-        }
-
-        private static void DrawPlusSeparator()
-        {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                GUILayout.FlexibleSpace();
-                EditorGUILayout.LabelField("＋", GUILayout.Width(20f));
-                GUILayout.FlexibleSpace();
-            }
-        }
-
-        private void DrawShapeSelectionList()
-        {
-            using (new EditorGUILayout.VerticalScope())
-            {
-                DrawColoredBox(ContentColor, () =>
-                {
-                    EditorGUILayout.LabelField("シェイプキー一覧", EditorStyles.boldLabel);
-
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        _composeSearchText = EditorGUILayout.TextField("検索", _composeSearchText);
-                        if (!string.IsNullOrEmpty(_composeSearchText) && GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(20f)))
-                            _composeSearchText = "";
-                    }
-                    EditorGUILayout.Space(5);
-
-                    _shapeListScroll = EditorGUILayout.BeginScrollView(_shapeListScroll, GUILayout.Height(SCROLL_HEIGHT));
-                    DrawAvailableShapeList();
-                    EditorGUILayout.EndScrollView();
-                });
-            }
-        }
-
-        private void DrawAvailableShapeList()
-        {
-            if (_shapeNames.Count == 0)
-            {
-                EditorGUILayout.LabelField("シェイプキーがありません");
-                return;
-            }
-
-            foreach (var shapeName in _shapeNames)
-            {
-                if (!string.IsNullOrEmpty(_composeSearchText) &&
-                    !shapeName.Contains(_composeSearchText, System.StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    DrawBaseShapeSelectionButton(shapeName);
-                    DrawAddShapeButton(shapeName);
-                    EditorGUILayout.LabelField(shapeName);
-                }
-            }
-        }
-
-        private void DrawBaseShapeSelectionButton(string shapeName)
-        {
-            bool isBase = shapeName == _baseShapeName;
-            var prevBg = GUI.backgroundColor;
-            if (isBase)
-                GUI.backgroundColor = new Color(0.30f, 0.75f, 0.35f);
-            if (GUILayout.Button(isBase ? "✓ ベース" : "ベース", GUILayout.Width(BUTTON_WIDTH_MEDIUM)) && !isBase)
-            {
-                _baseShapeName = shapeName;
-                if (_overwriteShape)
-                    _newShapeName = shapeName;
-            }
-            GUI.backgroundColor = prevBg;
-        }
-
-        private void DrawAddShapeButton(string shapeName)
-        {
-            if (GUILayout.Button("追加", GUILayout.Width(BUTTON_WIDTH_MEDIUM)))
-            {
-                _composeShapes.Add((shapeName, 100f));
-            }
-        }
-
-        private void DrawComposeExecuteButton()
-        {
-            DrawColoredBox(HeaderColor, () =>
-            {
-                bool canCompose = CanExecuteCompose();
-                if (!canCompose)
-                {
-                    string reason = _composeTarget?.sharedMesh == null ? "対象メッシュを選択してください。"
-                        : string.IsNullOrEmpty(_baseShapeName)         ? "ベースシェイプキーを選択してください。"
-                        :                                                 "出力名を入力してください。";
-                    EditorGUILayout.HelpBox(reason, MessageType.Info);
-                }
-
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    if (GUILayout.Button("全クリア", GUILayout.Height(EXECUTE_BUTTON_HEIGHT), GUILayout.Width(BUTTON_WIDTH_LARGE)))
-                        ResetComposeData();
-
-                    GUILayout.FlexibleSpace();
-
-                    GUI.enabled = canCompose;
-                    if (GUILayout.Button("合成実行", GUILayout.Height(EXECUTE_BUTTON_HEIGHT), GUILayout.Width(BUTTON_WIDTH_LARGE)))
-                        ExecuteShapeCompose();
-                    GUI.enabled = true;
-                }
-            });
-        }
-
-        private bool CanExecuteCompose()
-        {
-            return _composeTarget?.sharedMesh != null &&
-                   !string.IsNullOrEmpty(_baseShapeName) &&
-                   (_overwriteShape || !string.IsNullOrEmpty(_newShapeName));
-        }
-
-        private void ResetComposeData()
-        {
-            _composeShapes.Clear();
-            _baseShapeName = "";
-            _newShapeName = "";
-        }
-
-        private void ExecuteShapeCompose()
-        {
-            if (_composeTarget?.sharedMesh == null || string.IsNullOrEmpty(_baseShapeName))
-            {
-                EditorUtility.DisplayDialog("エラー", "ベースシェイプキーが選択されていません。", "OK");
-                return;
-            }
-
-            string targetName = _overwriteShape ? _baseShapeName : _newShapeName;
-
-            if (string.IsNullOrEmpty(targetName))
-            {
-                EditorUtility.DisplayDialog("エラー", "出力名が指定されていません。", "OK");
-                return;
-            }
-
-            var originalMesh = _composeTarget.sharedMesh;
-
-            if (!_overwriteShape && CheckForDuplicateShapeName(originalMesh, targetName))
-                return;
-
-            try
-            {
-                EditorUtility.DisplayProgressBar("合成中", "メッシュ処理中...", 0f);
-
-                var newMesh = CreateComposedMesh(originalMesh, targetName);
-                if (newMesh == null) return;
-
-                EditorUtility.DisplayProgressBar("合成中", "保存中...", 0.8f);
-
-                string savePath = SaveMeshAsset(newMesh, targetName);
-                if (string.IsNullOrEmpty(savePath)) return;
-
-                EditorUtility.DisplayProgressBar("合成中", "適用中...", 0.9f);
-
-                ApplyComposedMesh(newMesh, savePath, targetName);
-            }
-            catch (System.Exception e)
-            {
-                EditorUtility.DisplayDialog("エラー", $"合成エラー:\n{e.Message}", "OK");
-                Debug.LogError($"Compose error: {e}");
-            }
-            finally
-            {
-                EditorUtility.ClearProgressBar();
-            }
-        }
-
-        private bool CheckForDuplicateShapeName(Mesh mesh, string targetName)
-        {
-            for (int i = 0; i < mesh.blendShapeCount; i++)
-            {
-                if (mesh.GetBlendShapeName(i) == targetName)
-                {
-                    return !EditorUtility.DisplayDialog("警告", $"「{targetName}」は既に存在します。続行しますか？", "続行", "キャンセル");
-                }
-            }
-            return false;
-        }
-
-        private Mesh CreateComposedMesh(Mesh originalMesh, string targetName)
-        {
-            var mesh = Object.Instantiate(originalMesh);
-            mesh.name = $"{originalMesh.name}_Composed";
-
-            int baseIndex = FindBlendShapeIndex(originalMesh, _baseShapeName);
-            if (baseIndex < 0)
-            {
-                EditorUtility.DisplayDialog("エラー", $"ベースシェイプキー「{_baseShapeName}」が見つかりません。", "OK");
-                return null;
-            }
-
-            var composedDeltas = ComputeComposedDeltas(originalMesh, baseIndex);
-
-            if (_overwriteShape)
-            {
-                return CreateMeshWithReplacedShape(mesh, originalMesh, targetName, composedDeltas);
-            }
-            else
-            {
-                mesh.ClearBlendShapes();
-                for (int i = 0; i < originalMesh.blendShapeCount; i++)
-                {
-                    CopyExistingBlendShape(originalMesh, mesh, i, originalMesh.GetBlendShapeName(i));
-                }
-                mesh.AddBlendShapeFrame(targetName, 100f, composedDeltas.vertices, composedDeltas.normals, composedDeltas.tangents);
-                return mesh;
-            }
-        }
-
-        private int FindBlendShapeIndex(Mesh mesh, string shapeName)
-        {
-            for (int i = 0; i < mesh.blendShapeCount; i++)
-            {
-                if (mesh.GetBlendShapeName(i) == shapeName)
-                    return i;
-            }
-            return -1;
-        }
-
-        private (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) ComputeComposedDeltas(Mesh originalMesh, int baseIndex)
-        {
-            var vertices = originalMesh.vertices;
-            var normals = originalMesh.normals;
-            var tangents = originalMesh.tangents;
-
-            var composedVertices = new Vector3[vertices.Length];
-            var composedNormals = new Vector3[normals.Length];
-            var composedTangents = new Vector3[tangents.Length];
-
-            System.Array.Copy(vertices, composedVertices, vertices.Length);
-            System.Array.Copy(normals, composedNormals, normals.Length);
-            for (int i = 0; i < tangents.Length; i++)
-                composedTangents[i] = tangents[i];
-
-            ApplyBaseShapeDeltas(originalMesh, baseIndex, composedVertices, composedNormals, composedTangents);
-            ApplyComposeShapeDeltas(originalMesh, composedVertices, composedNormals, composedTangents);
-
-            var finalDeltas = ComputeFinalDeltas(vertices, normals, tangents, composedVertices, composedNormals, composedTangents);
-            return finalDeltas;
-        }
-
-        private void ApplyBaseShapeDeltas(Mesh mesh, int baseIndex, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
-        {
-            var deltaVertices = new Vector3[vertices.Length];
-            var deltaNormals = new Vector3[normals.Length];
-            var deltaTangents = new Vector3[tangents.Length];
-
-            int lastFrame = mesh.GetBlendShapeFrameCount(baseIndex) - 1;
-            mesh.GetBlendShapeFrameVertices(baseIndex, lastFrame, deltaVertices, deltaNormals, deltaTangents);
-
-            for (int i = 0; i < vertices.Length; i++)
-            {
-                vertices[i] += deltaVertices[i];
-                normals[i] += deltaNormals[i];
-                tangents[i] += deltaTangents[i];
-            }
-        }
-
-        private void ApplyComposeShapeDeltas(Mesh mesh, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
-        {
-            if (_composeShapes.Count == 0) return;
-
-            float progress = 0.2f;
-            float step = 0.6f / _composeShapes.Count;
-
-            foreach (var (name, weight) in _composeShapes)
-            {
-                EditorUtility.DisplayProgressBar("合成中", $"処理中: {name}", progress);
-
-                int index = FindBlendShapeIndex(mesh, name);
-                if (index >= 0)
-                {
-                    ApplyShapeDelta(mesh, index, weight, vertices, normals, tangents);
-                }
-
-                progress += step;
-            }
-        }
-
-        private void ApplyShapeDelta(Mesh mesh, int index, float weight, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
-        {
-            var deltaVertices = new Vector3[vertices.Length];
-            var deltaNormals = new Vector3[normals.Length];
-            var deltaTangents = new Vector3[tangents.Length];
-
-            int lastFrame = mesh.GetBlendShapeFrameCount(index) - 1;
-            mesh.GetBlendShapeFrameVertices(index, lastFrame, deltaVertices, deltaNormals, deltaTangents);
-
-            float multiplier = weight / 100f;
-            for (int i = 0; i < vertices.Length; i++)
-            {
-                vertices[i] += deltaVertices[i] * multiplier;
-                normals[i] += deltaNormals[i] * multiplier;
-                tangents[i] += deltaTangents[i] * multiplier;
-            }
-        }
-
-        private (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) ComputeFinalDeltas(
-            Vector3[] originalVertices, Vector3[] originalNormals, Vector4[] originalTangents,
-            Vector3[] composedVertices, Vector3[] composedNormals, Vector3[] composedTangents)
-        {
-            var deltaVertices = new Vector3[originalVertices.Length];
-            var deltaNormals = new Vector3[originalNormals.Length];
-            var deltaTangents = new Vector3[originalTangents.Length];
-
-            for (int i = 0; i < originalVertices.Length; i++)
-            {
-                deltaVertices[i] = composedVertices[i] - originalVertices[i];
-                deltaNormals[i] = composedNormals[i] - originalNormals[i];
-                deltaTangents[i] = composedTangents[i] - new Vector3(originalTangents[i].x, originalTangents[i].y, originalTangents[i].z);
-            }
-
-            return (deltaVertices, deltaNormals, deltaTangents);
-        }
-
-        private static Mesh CreateMeshWithReplacedShape(Mesh mesh, Mesh originalMesh, string targetName, (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) deltas)
-        {
-            mesh.ClearBlendShapes();
-            for (int i = 0; i < originalMesh.blendShapeCount; i++)
-            {
-                string shapeName = originalMesh.GetBlendShapeName(i);
-                if (shapeName == targetName)
-                    mesh.AddBlendShapeFrame(shapeName, 100f, deltas.vertices, deltas.normals, deltas.tangents);
-                else
-                    CopyExistingBlendShape(originalMesh, mesh, i, shapeName);
-            }
-            return mesh;
-        }
-
-        private static void CopyExistingBlendShape(Mesh originalMesh, Mesh targetMesh, int shapeIndex, string shapeName)
-        {
-            int vertexCount = originalMesh.vertexCount;
-            int frameCount = originalMesh.GetBlendShapeFrameCount(shapeIndex);
-            for (int f = 0; f < frameCount; f++)
-            {
-                var deltaVertices = new Vector3[vertexCount];
-                var deltaNormals = new Vector3[vertexCount];
-                var deltaTangents = new Vector3[vertexCount];
-                float frameWeight = originalMesh.GetBlendShapeFrameWeight(shapeIndex, f);
-                originalMesh.GetBlendShapeFrameVertices(shapeIndex, f, deltaVertices, deltaNormals, deltaTangents);
-                targetMesh.AddBlendShapeFrame(shapeName, frameWeight, deltaVertices, deltaNormals, deltaTangents);
-            }
-        }
-
-        private string SaveMeshAsset(Mesh mesh, string shapeName)
-        {
-            string saveDirectory = "Assets/qsyi/GeneratedMeshes";
-            if (!Directory.Exists(saveDirectory))
-            {
-                Directory.CreateDirectory(saveDirectory);
-                AssetDatabase.Refresh();
-            }
-
-            string timestamp = System.DateTime.Now.ToString("yy_MMdd_HHmmss");
-            string fileName = $"{timestamp}.asset";
-            string filePath = Path.Combine(saveDirectory, fileName);
-
-            int counter = 1;
-            while (File.Exists(filePath))
-            {
-                fileName = $"{timestamp}_{counter++}.asset";
-                filePath = Path.Combine(saveDirectory, fileName);
-            }
-
-            AssetDatabase.CreateAsset(mesh, filePath);
-            AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh();
-
-            return filePath;
-        }
-
-        private void ApplyComposedMesh(Mesh newMesh, string savePath, string targetName)
-        {
-            Undo.RecordObject(_composeTarget, "Compose BlendShapes");
-            _composeTarget.sharedMesh = newMesh;
-            EditorUtility.SetDirty(_composeTarget);
-
-            EditorUtility.DisplayDialog("完了", $"「{targetName}」を合成しました。\n{savePath}", "OK");
-            ScanForCompose();
-        }
-
-        private void DrawScaleAdjustment()
-        {
-            using (new EditorGUILayout.VerticalScope(GUILayout.ExpandHeight(true)))
-            {
-                DrawArmatureSettings();
-
-                bool hasOutfitBones = _outfitBones.Count > 0;
-                bool hasAvatarBones = _avatarBones.Count > 0;
-
-                DrawColoredBox(HeaderColor, () =>
-                {
-                    bool isValidTarget = _targets.Count > 0 && _targets.All(t => t?.GetComponent<ModularAvatarMeshSettings>() != null);
-                    if (!isValidTarget)
-                    {
-                        EditorGUILayout.HelpBox("SetupOutfitした衣装を入れてください。", MessageType.Error);
-                    }
-
-                    if (!hasOutfitBones)
-                    {
-                        EditorGUILayout.HelpBox("衣装のボーンが見つかりません。", MessageType.Warning);
-                    }
-
-                    if (!hasAvatarBones && _avatarArmature != null)
-                    {
-                        EditorGUILayout.HelpBox("素体のボーンが見つかりません。", MessageType.Warning);
-                    }
-                });
-
-                DrawBoneDetectionWarnings();
-                DrawSeparator();
-                DrawAvatarScaleStatusList();
-                DrawSeparator();
-                DrawAutoScaleSyncControls(hasAvatarBones && hasOutfitBones);
-            }
-        }
-
-        private void DrawBoneDetectionWarnings()
-        {
-            var missingAvatarBones = BONE_ORDER.Where(b => !_avatarBones.ContainsKey(b)).ToList();
-            if (missingAvatarBones.Count > 0)
-                EditorGUILayout.HelpBox($"素体: {missingAvatarBones.Count} 件未検出 — {string.Join(", ", missingAvatarBones)}", MessageType.Warning);
-
-            foreach (var outfit in _targets.Where(t => t != null))
-            {
-                if (!_outfitBones.TryGetValue(outfit, out var boneMap))
-                {
-                    EditorGUILayout.HelpBox($"「{outfit.name}」: ボーンを検出できませんでした。", MessageType.Warning);
-                    continue;
-                }
-
-                var missing = BONE_ORDER.Where(b => !boneMap.ContainsKey(b)).ToList();
-                if (missing.Count > 0)
-                    EditorGUILayout.HelpBox($"「{outfit.name}」: {missing.Count} 件未検出 — {string.Join(", ", missing)}", MessageType.Warning);
-            }
-        }
-
-        private void DrawAvatarScaleStatusList()
-        {
-            DrawColoredBox(ContentColor, () =>
-            {
-                EditorGUILayout.LabelField("素体ボーンスケール", EditorStyles.boldLabel);
-                _scaleStatusScroll = EditorGUILayout.BeginScrollView(_scaleStatusScroll, GUILayout.ExpandHeight(true));
-
-                foreach (var boneName in BONE_ORDER.Where(b => _avatarBones.ContainsKey(b) && _avatarBones[b] != null))
-                    DrawBoneEntry(boneName);
-
-                var undetected = BONE_ORDER.Where(b => !_avatarBones.ContainsKey(b) || _avatarBones[b] == null).ToList();
-                if (undetected.Count > 0)
-                {
-                    DrawSeparator(padding: 2f);
-                    foreach (var boneName in undetected)
-                        DrawBoneEntry(boneName);
-                }
-
-                EditorGUILayout.EndScrollView();
-            }, GUILayout.ExpandHeight(true));
-        }
-
-        private void DrawBoneEntry(string boneName)
-        {
-            if (_avatarBones.TryGetValue(boneName, out var avatarBone) && avatarBone != null)
-            {
-                EditorGUILayout.LabelField(boneName, EditorStyles.boldLabel);
-
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    GUILayout.Label("Transform", GUILayout.Width(80f));
-                    GUI.enabled = false;
-                    EditorGUILayout.ObjectField(avatarBone, typeof(Transform), true);
-                    GUI.enabled = true;
-                }
-
-                EditorGUI.BeginChangeCheck();
-                var newScale = EditorGUILayout.Vector3Field("Scale", avatarBone.localScale);
-                if (EditorGUI.EndChangeCheck() && !Approximately(newScale, avatarBone.localScale))
-                {
-                    Undo.RecordObject(avatarBone, "Change Bone Transform Scale");
-                    avatarBone.localScale = newScale;
-                    EditorUtility.SetDirty(avatarBone);
-                }
-
-                var adjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
-                if (adjuster != null)
-                {
-                    EditorGUI.BeginChangeCheck();
-                    var newAdjScale = EditorGUILayout.Vector3Field("ScaleAdjuster", adjuster.Scale);
-                    if (EditorGUI.EndChangeCheck() && !Approximately(newAdjScale, adjuster.Scale))
-                        ApplyScaleAdjusterScale(adjuster, newAdjScale, true, "Change Bone ScaleAdjuster Scale");
-                }
-
-                DrawSeparator(padding: 2f);
-            }
-            else
-            {
-                if (_dimBoneStyle == null)
-                    _dimBoneStyle = new GUIStyle(EditorStyles.miniLabel)
-                    {
-                        normal = { textColor = EditorGUIUtility.isProSkin ? new Color(0.45f, 0.45f, 0.45f) : new Color(0.6f, 0.6f, 0.6f) }
-                    };
-                EditorGUILayout.LabelField($"− {boneName}", _dimBoneStyle);
-            }
-        }
-
-        private void DrawArmatureSettings()
-        {
-            DrawColoredBox(HeaderColor, () =>
-            {
-                _serializedObject.Update();
-                EditorGUI.BeginChangeCheck();
-                EditorGUILayout.PropertyField(_armatureProperty, new GUIContent("素体Armature"));
-                DrawOutfitArmatureSettings();
-                bool changed = EditorGUI.EndChangeCheck();
-                _serializedObject.ApplyModifiedProperties();
-
-                var armature = _armatureProperty.objectReferenceValue as Transform;
-                if (armature != _avatarArmature)
-                {
-                    _avatarArmature = armature;
-                }
-
-                if (_avatarArmature == null)
-                    EditorGUILayout.HelpBox("素体のArmatureを設定してください。", MessageType.Warning);
-
-                if (changed)
-                    ScanBones();
-            });
-
-            DrawSeparator();
-        }
-
-        private void DrawOutfitArmatureSettings()
-        {
-            EditorGUILayout.Space(4);
-
-            var targetOutfits = _targets.Where(t => t != null).ToList();
-            if (targetOutfits.Count == 0)
-            {
-                EditorGUILayout.HelpBox("探索対象に衣装を追加すると設定できます。", MessageType.Info);
-                return;
-            }
-
-            _outfitArmatureEntriesProperty.isExpanded = EditorGUILayout.Foldout(
-                _outfitArmatureEntriesProperty.isExpanded,
-                "衣装Armature",
-                true);
-
-            if (!_outfitArmatureEntriesProperty.isExpanded)
-                return;
-
-            EditorGUI.indentLevel++;
-            foreach (var outfit in targetOutfits)
-            {
-                var entry = GetOrCreateOutfitArmatureEntry(outfit);
-                int entryIndex = _outfitArmatureEntries.IndexOf(entry);
-                if (entryIndex < 0) continue;
-
-                var entryProperty = _outfitArmatureEntriesProperty.GetArrayElementAtIndex(entryIndex);
-                var armaturesProperty = entryProperty.FindPropertyRelative("Armatures");
-
-                if (armaturesProperty.arraySize < 1)
-                    armaturesProperty.arraySize = 1;
-
-                EditorGUILayout.PropertyField(
-                    armaturesProperty.GetArrayElementAtIndex(0),
-                    new GUIContent(outfit.name));
-            }
-            EditorGUI.indentLevel--;
-        }
-
-        private void DrawAutoScaleSyncControls(bool canSync)
-        {
-            DrawColoredBox(SelectColor, () =>
-            {
-                _autoSyncPosition = EditorGUILayout.ToggleLeft("Position も同期する（実験的機能）", _autoSyncPosition);
-                _autoSyncRotation = EditorGUILayout.ToggleLeft("Rotation も同期する（実験的機能）", _autoSyncRotation);
-
-                if (!canSync)
-                    EditorGUILayout.HelpBox("素体と衣装の両方にボーンが必要です。", MessageType.Info);
-
-                GUI.enabled = canSync && !EditorApplication.isPlaying;
-                if (GUILayout.Button("同期", GUILayout.Height(EXECUTE_BUTTON_HEIGHT)))
-                {
-                    ScanBones();
-                    ApplyAvatarScalesToOutfits();
-                    _syncCompletedTime = EditorApplication.timeSinceStartup;
-                }
-                GUI.enabled = true;
-
-                const double syncShowDuration = 3.0;
-                double elapsed = EditorApplication.timeSinceStartup - _syncCompletedTime;
-                if (_syncCompletedTime >= 0 && elapsed < syncShowDuration)
-                {
-                    var syncStyle = new GUIStyle(EditorStyles.miniLabel)
-                    {
-                        alignment = TextAnchor.MiddleCenter,
-                        normal    = { textColor = new Color(0.18f, 0.58f, 0.28f) }
-                    };
-                    EditorGUILayout.LabelField("✓ 同期しました", syncStyle);
-                    Repaint();
-                }
-                else if (_syncCompletedTime >= 0 && elapsed >= syncShowDuration)
-                {
-                    _syncCompletedTime = -1.0;
-                }
-            });
-        }
-
-        private static bool Approximately(Vector3 a, Vector3 b)
-        {
-            return Mathf.Approximately(a.x, b.x) &&
-                   Mathf.Approximately(a.y, b.y) &&
-                   Mathf.Approximately(a.z, b.z);
-        }
-
-        private static bool Approximately(Quaternion a, Quaternion b)
-        {
-            return Quaternion.Angle(a, b) < 0.01f;
-        }
-
-        private static bool IsAdjustChildPositionsEnabled()
-        {
-            if (!_adjustChildPositionsResolved)
-            {
-                _adjustChildPositionsResolved = true;
-
-                var toolType = global::System.Type.GetType(
-                    "nadena.dev.modular_avatar.core.editor.ScaleAdjusterTool, nadena.dev.modular-avatar.editor");
-
-                if (toolType == null)
-                {
-                    foreach (var assembly in global::System.AppDomain.CurrentDomain.GetAssemblies())
-                    {
-                        toolType = assembly.GetType("nadena.dev.modular_avatar.core.editor.ScaleAdjusterTool");
-                        if (toolType != null)
-                            break;
-                    }
-                }
-
-                if (toolType != null)
-                {
-                    _adjustChildPositionsField = toolType.GetField(
-                        "AdjustChildPositions",
-                        BindingFlags.Public | BindingFlags.Static);
-                }
-            }
-
-            if (_adjustChildPositionsField == null)
-                return true;
-
-            try
-            {
-                return _adjustChildPositionsField.GetValue(null) is bool enabled && enabled;
-            }
-            catch
-            {
-                return true;
-            }
-        }
-
-        private static bool ApplyScaleAdjusterScale(
-            ModularAvatarScaleAdjuster adjuster,
-            Vector3 targetScale,
-            bool recordUndo,
-            string undoLabel)
-        {
-            if (adjuster == null)
-                return false;
-
-            Vector3 oldScale = adjuster.Scale;
-            if (Approximately(oldScale, targetScale))
-                return false;
-
-            if (recordUndo)
-                Undo.RecordObject(adjuster, undoLabel);
-
-            adjuster.Scale = targetScale;
-            PrefabUtility.RecordPrefabInstancePropertyModifications(adjuster);
-            EditorUtility.SetDirty(adjuster);
-
-            if (!IsAdjustChildPositionsEnabled())
-                return true;
-
-            Vector3 scaleDelta = new Vector3(
-                SafeDivide(targetScale.x, oldScale.x),
-                SafeDivide(targetScale.y, oldScale.y),
-                SafeDivide(targetScale.z, oldScale.z));
-            Matrix4x4 updateTransform = Matrix4x4.Scale(scaleDelta);
-
-            foreach (Transform child in adjuster.transform)
-            {
-                if (recordUndo)
-                    Undo.RecordObject(child, undoLabel);
-
-                child.localPosition = updateTransform.MultiplyPoint(child.localPosition);
-                PrefabUtility.RecordPrefabInstancePropertyModifications(child);
-                EditorUtility.SetDirty(child);
-            }
-
-            return true;
-        }
-
-        private static float SafeDivide(float numerator, float denominator)
-        {
-            return Mathf.Abs(denominator) < 0.000001f ? 1f : numerator / denominator;
-        }
-
-        private void ApplyAvatarScalesToOutfits()
-        {
-            if (_avatarBones.Count == 0 || _outfitBones.Count == 0)
-                return;
-
-            Undo.SetCurrentGroupName("Sync Bones");
-            int undoGroup = Undo.GetCurrentGroup();
-            bool hasAnyChange = false;
-
-            try
-            {
-                foreach (var boneName in BONE_ORDER)
-                {
-                    if (!_avatarBones.TryGetValue(boneName, out var avatarBone) || avatarBone == null)
-                        continue;
-
-                    var avatarAdjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
-                    Vector3 avatarLocalScale = avatarBone.localScale;
-                    Vector3 avatarLocalPosition = avatarBone.localPosition;
-                    Quaternion avatarLocalRotation = avatarBone.localRotation;
-
-                    foreach (var outfit in _targets.Where(t => t != null))
-                    {
-                        if (!_outfitBones.TryGetValue(outfit, out var boneMap) ||
-                            !boneMap.TryGetValue(boneName, out var outfitBone) ||
-                            outfitBone == null ||
-                            outfitBone == avatarBone)
-                            continue;
-
-                        if (!Approximately(outfitBone.localScale, avatarLocalScale))
-                        {
-                            Undo.RecordObject(outfitBone, "Auto Sync Transform Scale");
-                            outfitBone.localScale = avatarLocalScale;
-                            EditorUtility.SetDirty(outfitBone);
-                            hasAnyChange = true;
-                        }
-
-                        if (_autoSyncPosition)
-                        {
-                            if (!Approximately(outfitBone.localPosition, avatarLocalPosition))
-                            {
-                                Undo.RecordObject(outfitBone, "Auto Sync Transform Position");
-                                outfitBone.localPosition = avatarLocalPosition;
-                                EditorUtility.SetDirty(outfitBone);
-                                hasAnyChange = true;
-                            }
-                        }
-
-                        if (_autoSyncRotation)
-                        {
-                            if (!Approximately(outfitBone.localRotation, avatarLocalRotation))
-                            {
-                                Undo.RecordObject(outfitBone, "Auto Sync Transform Rotation");
-                                outfitBone.localRotation = avatarLocalRotation;
-                                EditorUtility.SetDirty(outfitBone);
-                                hasAnyChange = true;
-                            }
-                        }
-
-                        if (avatarAdjuster == null)
-                            continue;
-
-                        var outfitAdjuster = outfitBone.GetComponent<ModularAvatarScaleAdjuster>();
-                        if (outfitAdjuster == null)
-                        {
-                            outfitAdjuster = Undo.AddComponent<ModularAvatarScaleAdjuster>(outfitBone.gameObject);
-                            hasAnyChange = true;
-                        }
-
-                        if (!Approximately(outfitAdjuster.Scale, avatarAdjuster.Scale))
-                        {
-                            hasAnyChange |= ApplyScaleAdjusterScale(
-                                outfitAdjuster,
-                                avatarAdjuster.Scale,
-                                true,
-                                "Auto Sync ScaleAdjuster");
-                        }
-                    }
-                }
-
-                if (hasAnyChange)
-                    Undo.CollapseUndoOperations(undoGroup);
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"[qsToolBox] Sync error: {e}");
-            }
-        }
-
         private void ScanData()
         {
             switch (_mode)
             {
-                case Mode.Material: ScanMaterials(); break;
-                case Mode.BlendShape:
-                    ScanSkinnedMeshRenderers();
-                    ScanForCompose();
+                case Mode.Material:
+                    if (ScanMaterials()) RebuildMaterialPane();
                     break;
-                case Mode.Scale: ScanBones(); break;
-                case Mode.MenuGenerator: ScanMenuMeshEntries(); break;
+                case Mode.BlendShape:
+                    if (ScanSkinnedMeshRenderers()) { ScanForCompose(); RebuildBlendShapePane(); }
+                    break;
+                case Mode.Scale:
+                    if (ScanBones()) RebuildScalePane();
+                    break;
+                case Mode.ShadowSync:
+                    if (ScanMaterials()) RebuildShadowSyncDestList();
+                    break;
+                case Mode.MenuGenerator:
+                    if (ScanMenuMeshEntries()) RebuildMenuPane();
+                    else UpdateMenuGenerateButton();
+                    break;
             }
         }
 
-        private void DrawMenuGenerator()
-        {
-            using (new EditorGUILayout.VerticalScope())
-            {
-                DrawColoredBox(HeaderColor, () =>
-                {
-                    EditorGUILayout.LabelField("簡易メニュー生成", EditorStyles.boldLabel);
-                    _menuFolderName = EditorGUILayout.TextField(new GUIContent("フォルダ名", "生成先フォルダ名"), _menuFolderName);
-                    _menuPreviewEnabled = EditorGUILayout.ToggleLeft("プレビュー", _menuPreviewEnabled);
-                    if (string.IsNullOrWhiteSpace(_menuFolderName))
-                        EditorGUILayout.HelpBox("フォルダ名を入力してください。", MessageType.Warning);
-                });
-
-                DrawColoredBox(ContentColor, () =>
-                {
-                    EditorGUILayout.LabelField("生成対象", EditorStyles.boldLabel);
-                    _menuRendererScroll = EditorGUILayout.BeginScrollView(_menuRendererScroll, GUILayout.ExpandHeight(true));
-                    DrawMenuMeshEntries();
-                    EditorGUILayout.EndScrollView();
-                });
-
-                DrawMenuGenerateExecuteButton();
-            }
-
-            SyncMenuPreviewState();
-        }
-
-        private void DrawMenuGenerateExecuteButton()
-        {
-            DrawColoredBox(SelectColor, () =>
-            {
-                bool canGenerate = CanGenerateMenu();
-                if (!canGenerate)
-                    EditorGUILayout.HelpBox(GetMenuGenerateWarningMessage(), MessageType.Info);
-
-                GUI.enabled = canGenerate;
-                if (GUILayout.Button("生成", GUILayout.Height(EXECUTE_BUTTON_HEIGHT)))
-                    GenerateMenu();
-                GUI.enabled = true;
-            });
-        }
-
-        private void GenerateMenu()
-        {
-            var parentTarget = FindMenuGenerationRoot();
-            var entriesToGenerate = GetGeneratableMenuMeshEntries();
-            if (parentTarget == null || entriesToGenerate.Count == 0)
-                return;
-
-            int undoGroup = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("Generate Menu");
-
-            try
-            {
-                string folderName = GetGeneratedMenuFolderName();
-                var folderObject = new GameObject(folderName);
-                Undo.RegisterCreatedObjectUndo(folderObject, "Generate Menu");
-                folderObject.transform.SetParent(parentTarget.transform, false);
-
-                var generatedItemNames = new List<string>();
-
-                foreach (var entry in entriesToGenerate)
-                {
-                    string itemName = entry.Renderer.name;
-                    CreateToggleObject(
-                        folderObject.transform,
-                        itemName,
-                        new[] { entry.Renderer != null ? entry.Renderer.gameObject : null },
-                        new[] { false });
-                    generatedItemNames.Add(itemName);
-                }
-
-                var menuInstaller = Undo.AddComponent<ModularAvatarMenuInstaller>(folderObject);
-                ConfigureMenuInstaller(menuInstaller);
-                var menuItem = Undo.AddComponent<ModularAvatarMenuItem>(folderObject);
-                ConfigureFolderMenuItem(menuItem);
-                ForceRefreshGeneratedMenu(folderObject, menuItem);
-
-                EditorUtility.SetDirty(folderObject);
-                ScanData();
-                EditorUtility.DisplayDialog(
-                    "簡易メニュー生成",
-                    BuildMenuGeneratedDialogMessage(folderName, generatedItemNames),
-                    "OK");
-                Debug.Log($"[qsToolBox] Generated menu '{folderObject.name}' with {generatedItemNames.Count} item(s).");
-            }
-            finally
-            {
-                Undo.CollapseUndoOperations(undoGroup);
-              }
-          }
-
-        private GameObject FindMenuGenerationRoot()
-        {
-            foreach (var target in _targets.Where(IsValidTarget))
-            {
-                var current = target.transform;
-                while (current != null)
-                {
-                    if (current.GetComponent<VRCAvatarDescriptor>() != null)
-                        return current.gameObject;
-
-                    current = current.parent;
-                }
-            }
-
-            return _targets.FirstOrDefault(IsValidTarget);
-        }
-
-          private string GetGeneratedMenuFolderName()
-          {
-            string baseName = string.IsNullOrWhiteSpace(_menuFolderName)
-                ? _targets.FirstOrDefault(IsValidTarget)?.name ?? "Menu"
-                : _menuFolderName.Trim();
-
-            return baseName.StartsWith("Menu_") ? baseName : $"Menu_{baseName}";
-        }
-
-        private static void ApplyMenuItemDefaults(ModularAvatarMenuItem menuItem, PortableControlType type)
-        {
-            menuItem.PortableControl.Type = type;
-            menuItem.PortableControl.Value = 1f;
-            menuItem.PortableControl.Parameter = string.Empty;
-            menuItem.PortableControl.Icon = null;
-            menuItem.MenuSource = SubmenuSource.Children;
-            menuItem.isSynced = true;
-            menuItem.isSaved = true;
-            menuItem.isDefault = false;
-            menuItem.automaticValue = true;
-            menuItem.label = string.Empty;
-        }
-
-        private void ConfigureFolderMenuItem(ModularAvatarMenuItem menuItem)
-        {
-            ApplyMenuItemDefaults(menuItem, PortableControlType.SubMenu);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem.gameObject);
-            EditorUtility.SetDirty(menuItem);
-            EditorUtility.SetDirty(menuItem.gameObject);
-        }
-
-        private void ConfigureMenuInstaller(ModularAvatarMenuInstaller menuInstaller)
-        {
-            menuInstaller.menuToAppend = null;
-            menuInstaller.installTargetMenu = null;
-
-            PrefabUtility.RecordPrefabInstancePropertyModifications(menuInstaller);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(menuInstaller.gameObject);
-            EditorUtility.SetDirty(menuInstaller);
-            EditorUtility.SetDirty(menuInstaller.gameObject);
-        }
-
-        private void CreateToggleObject(Transform parent, string objectName, IEnumerable<GameObject> targetObjects, IEnumerable<bool> activeWhenOnValues)
-        {
-            var toggleObject = new GameObject(objectName);
-            Undo.RegisterCreatedObjectUndo(toggleObject, "Generate Menu");
-            toggleObject.transform.SetParent(parent, false);
-
-            var childMenuItem = Undo.AddComponent<ModularAvatarMenuItem>(toggleObject);
-            ConfigureChildMenuItem(childMenuItem);
-
-            var itemToggler = Undo.AddComponent<ItemToggler>(toggleObject);
-            ConfigureItemToggler(
-                itemToggler,
-                childMenuItem,
-                objectName,
-                targetObjects.Zip(activeWhenOnValues, (target, isOn) => (target, isOn))
-                    .Where(pair => pair.target != null)
-                    .Distinct()
-                    .ToList());
-            PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem.gameObject);
-            EditorUtility.SetDirty(childMenuItem);
-            EditorUtility.SetDirty(childMenuItem.gameObject);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(toggleObject);
-            EditorUtility.SetDirty(toggleObject);
-        }
-
-        private static void ConfigureChildMenuItem(ModularAvatarMenuItem menuItem)
-        {
-            ApplyMenuItemDefaults(menuItem, PortableControlType.Toggle);
-        }
-
-        private void ConfigureItemToggler(
-            ItemToggler itemToggler,
-            ModularAvatarMenuItem parentMenuItem,
-            string menuName,
-            IReadOnlyList<(GameObject target, bool activeWhenOn)> targetObjects)
-        {
-            var serializedObject = new SerializedObject(itemToggler);
-            serializedObject.Update();
-
-            serializedObject.FindProperty("menuName").stringValue = menuName;
-            serializedObject.FindProperty("parentOverride").objectReferenceValue = null;
-            serializedObject.FindProperty("icon").objectReferenceValue = null;
-            serializedObject.FindProperty("parentOverrideMA").objectReferenceValue = parentMenuItem;
-            serializedObject.FindProperty("isSave").boolValue = true;
-            serializedObject.FindProperty("isLocalOnly").boolValue = false;
-            serializedObject.FindProperty("autoFixDuplicate").boolValue = true;
-            serializedObject.FindProperty("defaultValue").boolValue = false;
-
-            var parameterProperty = serializedObject.FindProperty("parameter");
-            var objectsProperty = parameterProperty.FindPropertyRelative("objects");
-            objectsProperty.arraySize = targetObjects.Count;
-            for (int i = 0; i < targetObjects.Count; i++)
-            {
-                var objectElement = objectsProperty.GetArrayElementAtIndex(i);
-                objectElement.FindPropertyRelative("obj").objectReferenceValue = targetObjects[i].target;
-                objectElement.FindPropertyRelative("value").boolValue = targetObjects[i].activeWhenOn;
-            }
-
-            parameterProperty.FindPropertyRelative("blendShapeModifiers").arraySize = 0;
-            parameterProperty.FindPropertyRelative("materialReplacers").arraySize = 0;
-            parameterProperty.FindPropertyRelative("materialPropertyModifiers").arraySize = 0;
-            parameterProperty.FindPropertyRelative("clips").arraySize = 0;
-
-            serializedObject.ApplyModifiedProperties();
-            PrefabUtility.RecordPrefabInstancePropertyModifications(itemToggler);
-            PrefabUtility.RecordPrefabInstancePropertyModifications(itemToggler.gameObject);
-            EditorUtility.SetDirty(itemToggler);
-            EditorUtility.SetDirty(itemToggler.gameObject);
-        }
-
-        private void ForceRefreshGeneratedMenu(GameObject folderObject, ModularAvatarMenuItem menuItem)
-        {
-            if (folderObject == null)
-                return;
-
-            var childTogglers = folderObject.GetComponentsInChildren<ItemToggler>(true);
-            var childMenuItems = folderObject.GetComponentsInChildren<ModularAvatarMenuItem>(true);
-            MarkGeneratedMenuDirty(folderObject, menuItem, childMenuItems, childTogglers);
-
-            EditorApplication.delayCall += () =>
-            {
-                if (folderObject == null)
-                    return;
-
-                var delayedMenuItem = menuItem != null
-                    ? menuItem
-                    : folderObject.GetComponent<ModularAvatarMenuItem>();
-                var delayedChildMenuItems = folderObject.GetComponentsInChildren<ModularAvatarMenuItem>(true);
-                var delayedChildTogglers = folderObject.GetComponentsInChildren<ItemToggler>(true);
-                MarkGeneratedMenuDirty(folderObject, delayedMenuItem, delayedChildMenuItems, delayedChildTogglers);
-            };
-        }
-
-        private void MarkGeneratedMenuDirty(
-            GameObject folderObject,
-            ModularAvatarMenuItem menuItem,
-            IEnumerable<ModularAvatarMenuItem> childMenuItems,
-            IEnumerable<ItemToggler> childTogglers)
-        {
-            if (folderObject == null)
-                return;
-
-            if (menuItem != null)
-            {
-                PrefabUtility.RecordPrefabInstancePropertyModifications(menuItem);
-                EditorUtility.SetDirty(menuItem);
-            }
-
-            foreach (var childMenuItem in childMenuItems.Where(child => child != null))
-            {
-                PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem);
-                PrefabUtility.RecordPrefabInstancePropertyModifications(childMenuItem.gameObject);
-                EditorUtility.SetDirty(childMenuItem);
-                EditorUtility.SetDirty(childMenuItem.gameObject);
-            }
-
-            foreach (var toggler in childTogglers.Where(toggler => toggler != null))
-            {
-                PrefabUtility.RecordPrefabInstancePropertyModifications(toggler);
-                PrefabUtility.RecordPrefabInstancePropertyModifications(toggler.gameObject);
-                EditorUtility.SetDirty(toggler);
-                EditorUtility.SetDirty(toggler.gameObject);
-            }
-
-            PrefabUtility.RecordPrefabInstancePropertyModifications(folderObject);
-            EditorUtility.SetDirty(folderObject);
-            EditorSceneManager.MarkSceneDirty(folderObject.scene);
-        }
-
-        private string BuildMenuGeneratedDialogMessage(string folderName, IReadOnlyList<string> generatedItemNames)
-        {
-            var lines = new List<string> { folderName };
-            lines.AddRange(generatedItemNames.Select(name => $"・{name}"));
-            lines.Add(string.Empty);
-            lines.Add("メニューを生成しました");
-            return string.Join("\n", lines);
-        }
-
-        private void ScanSkinnedMeshRenderers()
+        private bool ScanSkinnedMeshRenderers()
         {
             _skinnedMeshRenderers.Clear();
 
@@ -1730,14 +279,18 @@ namespace qsyi
                 foreach (var smr in gameObject.GetComponentsInChildren<SkinnedMeshRenderer>(true))
                 {
                     if (smr.sharedMesh?.blendShapeCount > 0)
-                    {
                         _skinnedMeshRenderers.Add(smr);
-                    }
                 }
             }
+
+            int h = 17;
+            foreach (var smr in _skinnedMeshRenderers)
+                h = unchecked(h * 31 + (smr?.GetInstanceID() ?? 0));
+
+            return HashChanged(h, ref _lastSmrHash);
         }
 
-        private void ScanMaterials()
+        private bool ScanMaterials()
         {
             _materials.Clear();
             _materialUsage.Clear();
@@ -1745,17 +298,25 @@ namespace qsyi
             foreach (var gameObject in _targets.Where(IsValidTarget))
             {
                 foreach (var renderer in gameObject.GetComponentsInChildren<Renderer>(true))
-                {
                     ProcessRendererMaterials(renderer);
-                }
             }
 
-            foreach (var key in _materialFoldouts.Keys.Where(k => !_materials.Contains(k)).ToList())
-                _materialFoldouts.Remove(key);
+            int h = 17;
+            foreach (var m in _materials)
+                h = unchecked(h * 31 + (m?.GetInstanceID() ?? 0));
+
+            return HashChanged(h, ref _lastMaterialHash);
+        }
+
+        private static bool IsUnderEditorOnly(Transform t)
+        {
+            while (t != null) { if (t.CompareTag("EditorOnly")) return true; t = t.parent; }
+            return false;
         }
 
         private void ProcessRendererMaterials(Renderer renderer)
         {
+            if (IsUnderEditorOnly(renderer.transform)) return;
             var materials = renderer.sharedMaterials;
             for (int i = 0; i < materials.Length; i++)
             {
@@ -1772,430 +333,527 @@ namespace qsyi
             }
         }
 
-        private void ScanBones()
-        {
-            _outfitBones.Clear();
-            _avatarBones.Clear();
-            CleanupOutfitArmatureEntries();
-
-            FindAndSetAvatarArmature();
-
-            if (_avatarArmature != null)
-                BuildBoneMap(_avatarArmature, _avatarBones);
-
-            foreach (var outfit in _targets.Where(t => t != null))
-            {
-                var entry = GetOrCreateOutfitArmatureEntry(outfit);
-                TryAutoAssignOutfitArmatureOnce(entry, outfit);
-                var armatures = ResolveOutfitArmatures(outfit);
-                if (armatures.Count > 0)
-                {
-                    var boneMap = new Dictionary<string, Transform>();
-                    foreach (var armature in armatures)
-                    {
-                        var partialBoneMap = new Dictionary<string, Transform>();
-                        BuildBoneMap(armature, partialBoneMap);
-
-                        foreach (var kv in partialBoneMap)
-                        {
-                            if (!boneMap.ContainsKey(kv.Key))
-                                boneMap[kv.Key] = kv.Value;
-                        }
-                    }
-
-                    if (boneMap.Count > 0)
-                        _outfitBones[outfit] = boneMap;
-                }
-            }
-        }
-
-        private OutfitArmatureEntry GetOrCreateOutfitArmatureEntry(GameObject outfit)
-        {
-            var entry = _outfitArmatureEntries.FirstOrDefault(e => e != null && e.Outfit == outfit);
-            if (entry != null) return entry;
-
-            entry = new OutfitArmatureEntry { Outfit = outfit };
-            _outfitArmatureEntries.Add(entry);
-            return entry;
-        }
-
-        private void TryAutoAssignOutfitArmatureOnce(OutfitArmatureEntry entry, GameObject outfit)
-        {
-            if (entry == null || outfit == null || entry.AutoAssigned)
-                return;
-
-            entry.AutoAssigned = true;
-            if (entry.Armatures != null && entry.Armatures.Any(a => a != null))
-                return;
-
-            var autoArmature = FindChildByKeyword(outfit.transform, "armature");
-            if (autoArmature == null)
-                return;
-
-            if (entry.Armatures == null)
-                entry.Armatures = new List<Transform>();
-
-            entry.Armatures.Add(autoArmature);
-        }
-
-        private void CleanupOutfitArmatureEntries()
-        {
-            _outfitArmatureEntries.RemoveAll(e => e == null || e.Outfit == null || !_targets.Contains(e.Outfit));
-            foreach (var entry in _outfitArmatureEntries)
-            {
-                if (entry.Armatures == null)
-                    entry.Armatures = new List<Transform>();
-            }
-        }
-
-        private List<Transform> ResolveOutfitArmatures(GameObject outfit)
-        {
-            var entry = _outfitArmatureEntries.FirstOrDefault(e => e != null && e.Outfit == outfit);
-            if (entry?.Armatures != null)
-            {
-                var manualArmatures = entry.Armatures
-                    .Where(a => a != null)
-                    .Distinct()
-                    .ToList();
-                if (manualArmatures.Count > 0)
-                    return manualArmatures;
-            }
-            return new List<Transform>();
-        }
-
-        private void FindAndSetAvatarArmature()
-        {
-            if (_avatarArmature == null)
-            {
-                _avatarArmature = FindAvatarArmature();
-                if (_avatarArmature != null)
-                {
-                    _serializedObject.Update();
-                    _armatureProperty.objectReferenceValue = _avatarArmature;
-                    _serializedObject.ApplyModifiedProperties();
-                }
-            }
-        }
-
-        private void ScanForCompose()
-        {
-            UpdateComposeTarget();
-
-            _shapeNames.Clear();
-
-            if (_composeTarget?.sharedMesh != null)
-            {
-                var mesh = _composeTarget.sharedMesh;
-                for (int i = 0; i < mesh.blendShapeCount; i++)
-                    _shapeNames.Add(mesh.GetBlendShapeName(i));
-            }
-        }
-
-        private void UpdateComposeTarget()
-        {
-            if (NeedsComposeTargetUpdate())
-            {
-                var newTarget = FindFirstValidSkinnedMeshRenderer();
-                if (newTarget != null && newTarget != _composeTarget)
-                {
-                    _composeTarget = newTarget;
-                    ResetComposeData();
-                }
-            }
-        }
-
-        private bool NeedsComposeTargetUpdate()
-        {
-            return _composeTarget == null ||
-                   !_skinnedMeshRenderers.Contains(_composeTarget) ||
-                   _composeTarget.sharedMesh?.blendShapeCount == 0;
-        }
-
-        private static void DrawColoredBox(Color _, System.Action content, params GUILayoutOption[] options)
-        {
-            EditorGUILayout.BeginVertical(options);
-            content();
-            EditorGUILayout.EndVertical();
-        }
-
-        private static void DrawSeparator(float thickness = 1f, float padding = 3f)
-        {
-            var rect = GUILayoutUtility.GetRect(0f, padding * 2f + thickness, GUILayout.ExpandWidth(true));
-            if (Event.current.type == EventType.Repaint)
-            {
-                var line = new Rect(rect.x, rect.y + padding, rect.width, thickness);
-                EditorGUI.DrawRect(line, EditorGUIUtility.isProSkin ? new Color(0.13f, 0.13f, 0.13f) : new Color(0.60f, 0.60f, 0.60f));
-            }
-        }
-
-        private void ScanMenuMeshEntries()
-        {
-            EnsureDefaultMenuFolderName();
-
-            var previousSettings = _menuMeshEntries
-                .Where(entry => entry != null && IsValidMenuRenderer(entry.Renderer))
-                .GroupBy(entry => entry.Renderer)
-                .ToDictionary(
-                    group => group.Key,
-                    group => group.First().Include);
-
-            var scannedRenderers = _targets
-                .Where(IsValidTarget)
-                .SelectMany(target => target.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-                .Where(IsValidMenuRenderer)
-                .Distinct()
-                .ToList();
-
-            var existingEntries = _menuMeshEntries
-                .Where(entry => entry != null)
-                .ToList();
-
-            existingEntries.RemoveAll(e => e.Renderer == null || !scannedRenderers.Contains(e.Renderer));
-
-            foreach (var renderer in scannedRenderers)
-            {
-                bool alreadyExists = existingEntries.Any(entry => entry.Renderer == renderer);
-                if (alreadyExists)
-                    continue;
-
-                bool include = previousSettings.TryGetValue(renderer, out var settings)
-                    ? settings
-                    : false;
-
-                existingEntries.Add(new MenuMeshEntry
-                {
-                    Renderer = renderer,
-                    Include = include
-                });
-            }
-
-            _menuMeshEntries.Clear();
-            foreach (var e in existingEntries)
-                _menuMeshEntries.Add(e);
-        }
-
-        private void EnsureDefaultMenuFolderName()
-        {
-            if (!string.IsNullOrWhiteSpace(_menuFolderName))
-                return;
-
-            var defaultTarget = _targets.FirstOrDefault(IsValidTarget);
-            if (defaultTarget != null)
-                _menuFolderName = defaultTarget.name;
-        }
-
-        private void DrawMenuMeshEntries()
-        {
-            if (_menuMeshEntries.Count == 0)
-            {
-                EditorGUILayout.HelpBox("探索対象配下にメッシュが見つかりません。", MessageType.Info);
-                return;
-            }
-
-            _serializedObject.Update();
-            _menuMeshEntriesList.DoLayoutList();
-            _serializedObject.ApplyModifiedProperties();
-        }
-
-        private void SyncMenuPreviewState()
-        {
-            if (_mode != Mode.MenuGenerator || !_menuPreviewEnabled)
-            {
-                RestoreMenuPreviewState();
-                return;
-            }
-
-            var previewTargets = new HashSet<GameObject>(
-                _menuMeshEntries
-                    .Where(entry => entry != null && entry.Include && IsValidMenuRenderer(entry.Renderer))
-                    .Select(entry => entry.Renderer.gameObject)
-                    .Where(target => target != null));
-
-            var toRestore = _menuPreviewOriginalStates.Keys
-                .Where(target => target == null || !previewTargets.Contains(target))
-                .ToList();
-
-            foreach (var target in toRestore)
-            {
-                if (target != null && _menuPreviewOriginalStates.TryGetValue(target, out var originalState))
-                    target.SetActive(originalState);
-
-                _menuPreviewOriginalStates.Remove(target);
-            }
-
-            foreach (var target in previewTargets)
-            {
-                if (!_menuPreviewOriginalStates.ContainsKey(target))
-                    _menuPreviewOriginalStates[target] = target.activeSelf;
-
-                if (target.activeSelf)
-                    target.SetActive(false);
-            }
-        }
-
-        private void RestoreMenuPreviewState()
-        {
-            foreach (var pair in _menuPreviewOriginalStates.ToList())
-            {
-                if (pair.Key != null)
-                    pair.Key.SetActive(pair.Value);
-            }
-
-            _menuPreviewOriginalStates.Clear();
-        }
-
-        private bool CanGenerateMenu()
-        {
-            return !string.IsNullOrWhiteSpace(_menuFolderName) &&
-                GetGeneratableMenuMeshEntries().Count > 0;
-        }
-
-        private List<MenuMeshEntry> GetGeneratableMenuMeshEntries()
-        {
-            return _menuMeshEntries
-                .Where(entry => entry != null && entry.Include && IsValidMenuRenderer(entry.Renderer))
-                .GroupBy(entry => entry.Renderer)
-                .Select(group => group.First())
-                .ToList();
-        }
-
-        private bool IsValidMenuRenderer(SkinnedMeshRenderer renderer)
-        {
-            return renderer != null &&
-                renderer.sharedMesh != null &&
-                IsValidTarget(renderer.gameObject);
-        }
-
-        private string GetMenuGenerateWarningMessage()
-        {
-            if (string.IsNullOrWhiteSpace(_menuFolderName))
-                return "フォルダ名を入力してください。";
-
-            return "メニューを生成するには、含めるメッシュを 1 つ以上チェックしてください。";
-        }
-
         private bool IsValidTarget(GameObject target) => target != null && !target.CompareTag("EditorOnly");
 
-        private SkinnedMeshRenderer FindFirstValidSkinnedMeshRenderer()
+        // ─── UI Toolkit ───────────────────────────────────────────────
+
+        private VisualElement BuildHeader()
         {
-            foreach (var gameObject in _targets.Where(IsValidTarget))
-            {
-                var smr = gameObject.GetComponentsInChildren<SkinnedMeshRenderer>(true)
-                    .FirstOrDefault(s => s.sharedMesh?.blendShapeCount > 0);
-                if (smr != null) return smr;
-            }
-            return null;
+            var header = new VisualElement();
+            header.style.flexDirection  = FlexDirection.Row;
+            header.style.flexShrink     = 0;
+            header.style.alignItems     = Align.Center;
+            header.style.paddingLeft    = 12;
+            header.style.paddingRight   = 12;
+            header.style.paddingTop     = 5;
+            header.style.paddingBottom  = 5;
+            header.style.borderBottomWidth = 1;
+            header.style.borderBottomColor = ChromeBorderColor;
+
+            _versionLabel = new Label();
+            _versionLabel.style.marginLeft    = 8;
+            _versionLabel.style.fontSize      = 11;
+            _versionLabel.style.paddingLeft   = 6;
+            _versionLabel.style.paddingRight  = 6;
+            _versionLabel.style.paddingTop    = 2;
+            _versionLabel.style.paddingBottom = 2;
+            header.Add(_versionLabel);
+
+            var manualBtn = new Button(() => Application.OpenURL("https://qsyi.github.io/qsToolbox/"));
+            manualBtn.text = "マニュアル";
+            manualBtn.style.marginLeft    = new StyleLength(StyleKeyword.Auto);
+            manualBtn.style.fontSize      = 11;
+            manualBtn.style.paddingLeft   = 6;
+            manualBtn.style.paddingRight  = 6;
+            manualBtn.style.paddingTop    = 2;
+            manualBtn.style.paddingBottom = 2;
+            header.Add(manualBtn);
+
+            return header;
         }
 
-        private Transform FindAvatarArmature()
+        private VisualElement BuildTabBar()
         {
-            foreach (var target in _targets.Where(t => t != null))
+            var bar = new VisualElement();
+            bar.style.flexDirection   = FlexDirection.Row;
+            bar.style.flexShrink      = 0;
+            bar.style.borderBottomWidth = 1;
+            bar.style.borderBottomColor = ChromeBorderColor;
+
+            _tabElements = new VisualElement[UITOOLKIT_TABS.Length];
+            _tabAccents  = new VisualElement[UITOOLKIT_TABS.Length];
+
+            for (int i = 0; i < UITOOLKIT_TABS.Length; i++)
             {
-                var current = target.transform;
-                while (current != null)
-                {
-                    var descriptor = current.GetComponent<VRCAvatarDescriptor>();
-                    if (descriptor != null)
-                        return FindChildByKeyword(descriptor.transform, "armature");
-                    current = current.parent;
-                }
-            }
-            return null;
-        }
+                int idx = i;
+                var (icon, label, tooltip) = UITOOLKIT_TABS[i];
 
-        private Transform FindChildByKeyword(Transform parent, string keyword)
-        {
-            if (parent == null) return null;
+                var tab = new VisualElement();
+                tab.tooltip                  = tooltip;
+                tab.style.flexGrow           = 1;
+                tab.style.flexDirection      = FlexDirection.Row;
+                tab.style.alignItems         = Align.Center;
+                tab.style.justifyContent     = Justify.Center;
+                tab.style.paddingLeft        = 6;
+                tab.style.paddingRight       = 6;
+                tab.style.paddingTop         = 7;
+                tab.style.paddingBottom      = 7;
+                tab.style.position           = Position.Relative;
 
-            string normalizedKeyword = NormalizeBoneToken(keyword);
-            Transform bestMatch = null;
-            int bestExtra = int.MaxValue;
+                var iconLbl = new Label(icon);
+                iconLbl.name             = "tab-icon";
+                iconLbl.style.fontSize   = 13;
+                iconLbl.style.marginRight = 4;
+                tab.Add(iconLbl);
 
-            for (int i = 0; i < parent.childCount; i++)
-            {
-                var child = parent.GetChild(i);
-                string normalizedName = NormalizeBoneToken(child.name);
+                var textLbl = new Label(label);
+                textLbl.name           = "tab-text";
+                textLbl.style.fontSize = 11;
+                tab.Add(textLbl);
 
-                if (normalizedName == normalizedKeyword)
-                    return child;
 
-                if (normalizedName.Contains(normalizedKeyword))
-                {
-                    int extra = normalizedName.Length - normalizedKeyword.Length;
-                    if (extra < bestExtra)
-                    {
-                        bestExtra = extra;
-                        bestMatch = child;
-                    }
-                }
-            }
-            return bestMatch;
-        }
+                var accent = new VisualElement();
+                accent.style.position          = Position.Absolute;
+                accent.style.bottom            = 0;
+                accent.style.left              = 0;
+                accent.style.right             = 0;
+                accent.style.height            = 2;
+                accent.style.backgroundColor   = AccentColor;
+                accent.style.display           = DisplayStyle.None;
+                tab.Add(accent);
+                _tabAccents[i] = accent;
 
-        private static string NormalizeBoneToken(string source)
-        {
-            if (string.IsNullOrEmpty(source)) return string.Empty;
+                tab.RegisterCallback<MouseEnterEvent>(_ =>
+                    tab.style.backgroundColor = EditorGUIUtility.isProSkin
+                        ? new Color(0.26f, 0.26f, 0.28f, 1f)
+                        : new Color(0.78f, 0.78f, 0.80f, 1f));
+                tab.RegisterCallback<MouseLeaveEvent>(_ =>
+                    tab.style.backgroundColor = new StyleColor(StyleKeyword.Null));
+                tab.RegisterCallback<MouseDownEvent>(_ => OnTabClicked(idx));
 
-            var chars = source
-                .ToLowerInvariant()
-                .Where(char.IsLetterOrDigit)
-                .ToArray();
-            return new string(chars);
-        }
-
-        private void BuildBoneMap(Transform armature, Dictionary<string, Transform> boneMap)
-        {
-            foreach (var boneName in BONE_ORDER)
-            {
-                Transform foundBone = null;
-
-                if (BONE_PARENT.TryGetValue(boneName, out var parentName) && boneMap.TryGetValue(parentName, out var parent))
-                    foundBone = FindChildByKeyword(parent, boneName);
-                else
-                    foundBone = FindChildByKeyword(armature, boneName);
-
-                if (foundBone != null)
-                    boneMap[boneName] = foundBone;
-            }
-        }
-
-        private void ReplaceMaterial(Material oldMaterial, Material newMaterial)
-        {
-            if (!_materialUsage.TryGetValue(oldMaterial, out var usageList)) return;
-
-            foreach (var (renderer, index) in usageList.Where(u => u.Item1 != null))
-            {
-                Undo.RecordObject(renderer, "Change Material");
-                var materials = renderer.sharedMaterials;
-                if (index >= 0 && index < materials.Length)
-                {
-                    materials[index] = newMaterial;
-                    renderer.sharedMaterials = materials;
-                    EditorUtility.SetDirty(renderer);
-                }
+                _tabElements[i] = tab;
+                bar.Add(tab);
             }
 
-            UpdateMaterialReferences(oldMaterial, newMaterial, usageList);
+            SetActiveTab((int)_mode, false);
+            return bar;
         }
 
-        private void UpdateMaterialReferences(Material oldMaterial, Material newMaterial, List<(Renderer, int)> usageList)
+        private void OnTabClicked(int index)
         {
-            _materialUsage.Remove(oldMaterial);
-            for (int i = 0; i < _materials.Count; i++)
+            if ((int)_mode == index) return;
+
+            _mode = (Mode)index;
+            GUI.FocusControl(null);
+            _lastMaterialHash = null;
+            ScanData();
+            SetActiveTab(index, true);
+
+            bool matActive        = _mode == Mode.Material;
+            bool menuActive       = _mode == Mode.MenuGenerator;
+            bool blendActive      = _mode == Mode.BlendShape;
+            bool scaleActive      = _mode == Mode.Scale;
+            bool shadowSyncActive = _mode == Mode.ShadowSync;
+            if (_materialPane != null)
+                _materialPane.style.display   = matActive        ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_menuPane != null)
+                _menuPane.style.display       = menuActive       ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_blendShapePane != null)
+                _blendShapePane.style.display = blendActive      ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_scalePane != null)
+                _scalePane.style.display      = scaleActive      ? DisplayStyle.Flex : DisplayStyle.None;
+            if (_shadowSyncPane != null)
+                _shadowSyncPane.style.display = shadowSyncActive ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        private void SetActiveTab(int index, bool repaint)
+        {
+            bool dark = EditorGUIUtility.isProSkin;
+            Color activeText   = new Color(0.40f, 0.72f, 1.00f, 1f);
+            Color inactiveText = dark
+                ? new Color(0.65f, 0.65f, 0.65f, 1f)
+                : new Color(0.35f, 0.35f, 0.35f, 1f);
+
+            if (_tabElements == null) return;
+
+            for (int i = 0; i < _tabElements.Length; i++)
             {
-                if (_materials[i] == oldMaterial)
-                {
-                    _materials[i] = newMaterial;
-                    break;
-                }
+                bool active = i == index;
+                _tabAccents[i].style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+
+                Color c = active ? activeText : inactiveText;
+                _tabElements[i].Q<Label>("tab-icon").style.color = c;
+                var tl = _tabElements[i].Q<Label>("tab-text");
+                tl.style.color = c;
+                tl.style.unityFontStyleAndWeight = active ? FontStyle.Bold : FontStyle.Normal;
             }
 
-            if (!_materialUsage.ContainsKey(newMaterial))
-                _materialUsage[newMaterial] = usageList;
+            if (repaint) Repaint();
+        }
+
+        private void UpdateVersionLabel()
+        {
+            if (_versionLabel == null) return;
+
+            if (QsVersionChecker.HasUpdate || QsVersionChecker.CheckComplete)
+            {
+                bool hasUpdate = QsVersionChecker.HasUpdate;
+                Color c = hasUpdate
+                    ? new Color(0.80f, 0.42f, 0.08f, 1f)
+                    : new Color(0.18f, 0.58f, 0.28f, 1f);
+                _versionLabel.text = hasUpdate
+                    ? $"↑ v{QsVersionChecker.LatestVersion} が公開されています"
+                    : $"✓ v{QsVersionChecker.CurrentVersion} 最新バージョンです";
+                _versionLabel.style.color = c;
+                _versionLabel.style.backgroundColor = new Color(c.r, c.g, c.b, 0.10f);
+            }
+            else if (QsVersionChecker.IsFetching)
+            {
+                _versionLabel.text = "確認中…";
+                _versionLabel.style.color = new Color(0.50f, 0.50f, 0.50f, 1f);
+                _versionLabel.style.backgroundColor = new StyleColor(StyleKeyword.Null);
+            }
             else
-                _materialUsage[newMaterial].AddRange(usageList);
+            {
+                _versionLabel.text = "";
+                _versionLabel.style.backgroundColor = new StyleColor(StyleKeyword.Null);
+            }
         }
 
+        // ── 複数モードで共有するヘルパー ────────────────────────────────
+
+        private static VisualElement MakeRendererField(Renderer renderer)
+        {
+            var wrap = new VisualElement();
+            wrap.style.flexGrow = 1;
+            if (renderer != null)
+                wrap.RegisterCallback<MouseDownEvent>(evt =>
+                {
+                    EditorGUIUtility.PingObject(renderer);
+                    evt.StopPropagation();
+                });
+
+            var field = new ObjectField();
+            field.objectType        = typeof(Renderer);
+            field.allowSceneObjects = true;
+            field.value             = renderer;
+            field.label             = "";
+            field.style.flexGrow    = 1;
+            field.SetEnabled(false);
+
+            // Remove the empty label area
+            field.Q<Label>(className: "unity-base-field__label")?.RemoveFromHierarchy();
+
+            wrap.Add(field);
+            return wrap;
+        }
+
+        // ── Target Area (UI Toolkit) ──────────────────────────────────
+
+        private VisualElement BuildTargetArea()
+        {
+            var area = new VisualElement();
+            area.style.flexShrink    = 0;
+            area.style.paddingLeft   = 8;
+            area.style.paddingRight  = 8;
+            area.style.paddingTop    = 5;
+            area.style.paddingBottom = 5;
+            area.style.borderBottomWidth = 1;
+            area.style.borderBottomColor = ChromeBorderColor;
+
+            var header = new VisualElement();
+            header.style.flexDirection = FlexDirection.Row;
+            header.style.alignItems    = Align.Center;
+            header.style.marginBottom  = 3;
+
+            _targetFoldoutArrow = new Label(_targetAreaExpanded ? "▼" : "▶");
+            _targetFoldoutArrow.style.fontSize    = 9;
+            _targetFoldoutArrow.style.color       = TextColor;
+            _targetFoldoutArrow.style.marginRight = 3;
+            _targetFoldoutArrow.style.display     = DisplayStyle.None; // 測定後に ApplyTargetAreaHeight が制御
+            header.Add(_targetFoldoutArrow);
+
+            _targetTitleLabel = new Label("探索対象");
+            _targetTitleLabel.style.fontSize = 12;
+            _targetTitleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            _targetTitleLabel.style.color    = TextColor;
+            _targetTitleLabel.style.flexGrow = 1;
+            header.Add(_targetTitleLabel);
+
+            var ctrlQHint = new Label("もう一度 Ctrl+Q で選択物を再スキャン");
+            ctrlQHint.style.fontSize   = 11;
+            ctrlQHint.style.color      = EditorGUIUtility.isProSkin
+                ? new Color(0.55f, 0.55f, 0.55f, 1f)
+                : new Color(0.45f, 0.45f, 0.45f, 1f);
+            ctrlQHint.style.marginRight = 6;
+            header.Add(ctrlQHint);
+
+            var rescanBtn = new Button(() => { ScanData(); RebuildTargetChips(); });
+            rescanBtn.text    = "↺";
+            rescanBtn.tooltip = "再スキャン";
+            rescanBtn.style.width        = 26;
+            rescanBtn.style.height       = 20;
+            rescanBtn.style.fontSize     = 12;
+            rescanBtn.style.paddingLeft  = rescanBtn.style.paddingRight = 0;
+            header.Add(rescanBtn);
+
+            // ▶/▼ とラベルをクリックで折りたたみトグル（左クリックのみ、↺ボタン除外）
+            header.RegisterCallback<MouseDownEvent>(evt =>
+            {
+                if (evt.button != 0) return;
+                if (rescanBtn == evt.target || rescanBtn.Contains(evt.target as VisualElement)) return;
+                _targetAreaExpanded = !_targetAreaExpanded;
+                _targetFoldoutArrow.text = _targetAreaExpanded ? "▼" : "▶";
+                ApplyTargetAreaHeight();
+                evt.StopPropagation();
+            });
+
+            area.Add(header);
+
+            // 折りたたみ高さの測定中に下のモード選択行が動かないよう、
+            // 表示用の固定高さスロットと、実測定用の中身を分離する。
+            _targetChipsSlot = new VisualElement();
+            _targetChipsSlot.style.position = Position.Relative;
+            _targetChipsSlot.style.overflow = Overflow.Hidden;
+            area.Add(_targetChipsSlot);
+
+            _targetChipsWrap = new VisualElement();
+            _targetChipsWrap.style.flexDirection = FlexDirection.Row;
+            _targetChipsWrap.style.flexWrap      = Wrap.Wrap;
+            _targetChipsWrap.style.alignItems    = Align.Center;
+            _targetChipsWrap.style.overflow      = Overflow.Hidden;
+            _targetChipsWrap.style.position      = Position.Relative;
+            _targetChipsSlot.Add(_targetChipsWrap);
+
+            RebuildTargetChips();
+
+            area.RegisterCallback<DragUpdatedEvent>(evt =>
+            {
+                bool any = false;
+                foreach (var o in DragAndDrop.objectReferences)
+                    if (o is GameObject) { any = true; break; }
+                DragAndDrop.visualMode = any
+                    ? DragAndDropVisualMode.Link
+                    : DragAndDropVisualMode.Rejected;
+                evt.StopPropagation();
+            });
+
+            area.RegisterCallback<DragPerformEvent>(evt =>
+            {
+                DragAndDrop.AcceptDrag();
+                foreach (var obj in DragAndDrop.objectReferences)
+                    if (obj is GameObject go)
+                        AddTargetObject(go);
+                // 折りたたみ中でも追加したチップが見えるよう自動展開
+                if (!_targetAreaExpanded)
+                {
+                    _targetAreaExpanded = true;
+                    if (_targetFoldoutArrow != null)
+                        _targetFoldoutArrow.text = "▼";
+                    ApplyTargetAreaHeight();
+                }
+                evt.StopPropagation();
+            });
+
+            return area;
+        }
+
+        private void RebuildTargetChips()
+        {
+            if (_targetChipsWrap == null) return;
+            bool dark = EditorGUIUtility.isProSkin;
+
+            _targetChipsWrap.Clear();
+
+            Color chipBg     = dark ? new Color(0.28f, 0.28f, 0.31f, 1f) : new Color(0.88f, 0.88f, 0.90f, 1f);
+            Color chipBorder = dark ? new Color(0.38f, 0.38f, 0.42f, 1f) : new Color(0.62f, 0.62f, 0.66f, 1f);
+
+            bool allNull = _targets.Count == 0 || _targets.All(t => t == null);
+
+            for (int i = 0; i < _targets.Count; i++)
+            {
+                int capturedI = i;
+                var target = _targets[i];
+
+                var chip = new VisualElement();
+                chip.style.flexDirection  = FlexDirection.Row;
+                chip.style.alignItems     = Align.Center;
+                chip.style.paddingLeft    = 7;
+                chip.style.paddingRight   = 4;
+                chip.style.paddingTop     = 2;
+                chip.style.paddingBottom  = 2;
+                chip.style.marginRight    = 4;
+                chip.style.marginBottom   = 2;
+                chip.style.backgroundColor = chipBg;
+                chip.style.borderTopWidth = chip.style.borderRightWidth =
+                    chip.style.borderBottomWidth = chip.style.borderLeftWidth = 1;
+                chip.style.borderTopColor = chip.style.borderRightColor =
+                    chip.style.borderBottomColor = chip.style.borderLeftColor = chipBorder;
+                chip.style.borderTopLeftRadius = chip.style.borderTopRightRadius =
+                    chip.style.borderBottomLeftRadius = chip.style.borderBottomRightRadius = 10;
+
+                if (target == null)
+                {
+                    var missingLbl = new Label("(Missing)");
+                    missingLbl.style.fontSize = 11;
+                    missingLbl.style.color    = DimColor;
+                    chip.Add(missingLbl);
+                }
+                else
+                {
+                    var dot = new Label("◼");
+                    dot.style.fontSize    = 7;
+                    dot.style.color       = AccentColor;
+                    dot.style.marginRight = 4;
+                    chip.Add(dot);
+
+                    var nameLbl = new Label(target.name);
+                    nameLbl.style.fontSize = 11;
+                    nameLbl.style.color    = TextColor;
+                    chip.Add(nameLbl);
+
+                    // Ping on click (chip body, not × button)
+                    var pingTarget = target;
+                    dot.RegisterCallback<MouseDownEvent>(_ => EditorGUIUtility.PingObject(pingTarget));
+                    nameLbl.RegisterCallback<MouseDownEvent>(_ => EditorGUIUtility.PingObject(pingTarget));
+                    nameLbl.RegisterCallback<MouseEnterEvent>(_ => nameLbl.style.color = AccentColor);
+                    nameLbl.RegisterCallback<MouseLeaveEvent>(_ => nameLbl.style.color = TextColor);
+                }
+
+                var xBtn = new Label("×");
+                xBtn.style.fontSize   = 11;
+                xBtn.style.color      = DimColor;
+                xBtn.style.marginLeft = 4;
+                xBtn.RegisterCallback<MouseEnterEvent>(_ =>
+                    xBtn.style.color = new Color(0.90f, 0.30f, 0.25f, 1f));
+                xBtn.RegisterCallback<MouseLeaveEvent>(_ =>
+                    xBtn.style.color = DimColor);
+                xBtn.RegisterCallback<MouseDownEvent>(_ => RemoveTargetAt(capturedI));
+                chip.Add(xBtn);
+
+                _targetChipsWrap.Add(chip);
+            }
+
+            if (allNull)
+            {
+                var hint = new Label("Hierarchy からドラッグ");
+                hint.style.fontSize = 11;
+                hint.style.color    = DimColor;
+                hint.style.unityFontStyleAndWeight = FontStyle.Italic;
+                _targetChipsWrap.Add(hint);
+            }
+            else
+            {
+                var addHint = new Label("+ D&D");
+                addHint.style.fontSize        = 10;
+                addHint.style.color           = DimColor;
+                addHint.style.paddingLeft     = 5;
+                addHint.style.paddingRight    = 5;
+                addHint.style.paddingTop      = 2;
+                addHint.style.paddingBottom   = 2;
+                addHint.style.borderTopWidth  = addHint.style.borderRightWidth =
+                    addHint.style.borderBottomWidth = addHint.style.borderLeftWidth = 1;
+                addHint.style.borderTopColor  = addHint.style.borderRightColor =
+                    addHint.style.borderBottomColor = addHint.style.borderLeftColor = chipBorder;
+                addHint.style.borderTopLeftRadius = addHint.style.borderTopRightRadius =
+                    addHint.style.borderBottomLeftRadius = addHint.style.borderBottomRightRadius = 10;
+                _targetChipsWrap.Add(addHint);
+            }
+
+            // 表示中のスロット高さは変えず、中身だけ absolute+hidden にして
+            // 折りたたみが必要かどうかを1フレーム後に測定する（モード選択行のジャンプを防止）。
+            _targetChipsWrap.style.position   = Position.Absolute;
+            _targetChipsWrap.style.visibility = Visibility.Hidden;
+            _targetChipsWrap.style.width      = _targetChipsSlot.resolvedStyle.width;
+            _targetChipsWrap.style.maxHeight  = new StyleLength(StyleKeyword.None);
+            int rebuildId = ++_targetRebuildId;
+            _targetChipsWrap.schedule.Execute(() =>
+            {
+                if (_targetRebuildId != rebuildId) return;
+                _targetNeedsFoldout = _targetChipsWrap.layout.height > 36f;
+                _targetChipsWrap.style.position   = Position.Relative;
+                _targetChipsWrap.style.visibility = Visibility.Visible;
+                _targetChipsWrap.style.width      = new StyleLength(StyleKeyword.Auto);
+                ApplyTargetAreaHeight();
+            });
+        }
+
+        private void ApplyTargetAreaHeight()
+        {
+            if (_targetChipsSlot == null) return;
+
+            bool collapsed = _targetNeedsFoldout && !_targetAreaExpanded;
+
+            _targetChipsSlot.style.height = collapsed
+                ? new StyleLength(TARGET_AREA_COLLAPSED_HEIGHT)
+                : new StyleLength(StyleKeyword.Auto);
+
+            if (_targetFoldoutArrow != null)
+                _targetFoldoutArrow.style.display = _targetNeedsFoldout ? DisplayStyle.Flex : DisplayStyle.None;
+
+            if (_targetTitleLabel != null)
+            {
+                int count = _targets.Count(t => t != null);
+                _targetTitleLabel.text = count > 0 ? $"探索対象 ({count}件)" : "探索対象";
+            }
+        }
+
+        private void PollTargetChanges()
+        {
+            _serializedObject.Update();
+            int currentHash = GetTargetHash();
+            bool hashChanged = currentHash != _lastTargetHash;
+
+            if (!_isDirty && !hashChanged) return;
+
+            _isDirty = false;
+
+            if (hashChanged)
+            {
+                _lastTargetHash = currentHash;
+                InvalidateContentCaches();
+                RebuildTargetChips();
+            }
+
+            ScanData();
+
+            if (_mode == Mode.ShadowSync)
+            {
+                int srcHash = ComputeShadowSourceHash();
+                if (_lastShadowSourceHash != srcHash)
+                {
+                    _lastShadowSourceHash = srcHash;
+                    RefreshShadowSyncSwatches();
+                }
+            }
+        }
+
+        private void AddTargetObject(GameObject go)
+        {
+            if (_targets.Contains(go)) return;
+            _serializedObject.Update();
+            int idx = _targetsProperty.arraySize;
+            _targetsProperty.arraySize++;
+            _targetsProperty.GetArrayElementAtIndex(idx).objectReferenceValue = go;
+            _serializedObject.ApplyModifiedProperties();
+            _lastTargetHash = GetTargetHash();
+            ScanData();
+            RebuildTargetChips();
+        }
+
+        private void RemoveTargetAt(int index)
+        {
+            if (index < 0 || index >= _targets.Count) return;
+            _serializedObject.Update();
+            var elem = _targetsProperty.GetArrayElementAtIndex(index);
+            if (elem.objectReferenceValue != null)
+                elem.objectReferenceValue = null;
+            _targetsProperty.DeleteArrayElementAtIndex(index);
+            _serializedObject.ApplyModifiedProperties();
+            _lastTargetHash = GetTargetHash();
+            ScanData();
+            RebuildTargetChips();
+        }
     }
 }
 #endif

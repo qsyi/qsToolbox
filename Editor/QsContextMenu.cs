@@ -68,34 +68,24 @@ namespace qsyi
 
 
         [MenuItem("GameObject/qs_toolbox/頭に追従(MABoneProxy)", false, 20)]
-        private static void AddHeadBoneProxy(MenuCommand command)
-        {
-            var go = command.context as GameObject ?? Selection.activeGameObject;
-            if (go == null) return;
-
-            if (go.GetComponent<ModularAvatarBoneProxy>() != null)
-            {
-                Debug.LogWarning($"[qs_toolbox] {go.name} には既に MA Bone Proxy が付いています。");
-                return;
-            }
-
-            Undo.IncrementCurrentGroup();
-            var proxy = Undo.AddComponent<ModularAvatarBoneProxy>(go);
-            proxy.boneReference = HumanBodyBones.Head;
-            proxy.subPath = "";
-            EditorUtility.SetDirty(go);
-            Undo.SetCurrentGroupName("頭に追従(MABoneProxy)を追加");
-        }
+        private static void AddHeadBoneProxy(MenuCommand command) =>
+            AddBoneProxy(command, HumanBodyBones.Head, "頭に追従(MABoneProxy)を追加");
 
         [MenuItem("GameObject/qs_toolbox/頭に追従(MABoneProxy)", true)]
-        private static bool ValidateAddHeadBoneProxy()
-        {
-            return Selection.activeGameObject != null
-                && Selection.activeGameObject.GetComponent<VRCAvatarDescriptor>() == null;
-        }
+        private static bool ValidateAddHeadBoneProxy() =>
+            Selection.activeGameObject != null
+            && Selection.activeGameObject.GetComponent<VRCAvatarDescriptor>() == null;
 
         [MenuItem("GameObject/qs_toolbox/腰に追従(MABoneProxy)", false, 21)]
-        private static void AddHipsBoneProxy(MenuCommand command)
+        private static void AddHipsBoneProxy(MenuCommand command) =>
+            AddBoneProxy(command, HumanBodyBones.Hips, "腰に追従(MABoneProxy)を追加");
+
+        [MenuItem("GameObject/qs_toolbox/腰に追従(MABoneProxy)", true)]
+        private static bool ValidateAddHipsBoneProxy() =>
+            Selection.activeGameObject != null
+            && Selection.activeGameObject.GetComponent<VRCAvatarDescriptor>() == null;
+
+        private static void AddBoneProxy(MenuCommand command, HumanBodyBones bone, string undoName)
         {
             var go = command.context as GameObject ?? Selection.activeGameObject;
             if (go == null) return;
@@ -108,17 +98,10 @@ namespace qsyi
 
             Undo.IncrementCurrentGroup();
             var proxy = Undo.AddComponent<ModularAvatarBoneProxy>(go);
-            proxy.boneReference = HumanBodyBones.Hips;
+            proxy.boneReference = bone;
             proxy.subPath = "";
             EditorUtility.SetDirty(go);
-            Undo.SetCurrentGroupName("腰に追従(MABoneProxy)を追加");
-        }
-
-        [MenuItem("GameObject/qs_toolbox/腰に追従(MABoneProxy)", true)]
-        private static bool ValidateAddHipsBoneProxy()
-        {
-            return Selection.activeGameObject != null
-                && Selection.activeGameObject.GetComponent<VRCAvatarDescriptor>() == null;
+            Undo.SetCurrentGroupName(undoName);
         }
     }
 }

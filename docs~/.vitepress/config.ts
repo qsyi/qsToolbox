@@ -17,9 +17,11 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'ホーム', link: '/' },
+      { text: 'パッチノート', link: '/changelog' },
     ],
     sidebar: [
       { text: 'インストール', link: '/install' },
+      { text: 'パッチノート', link: '/changelog' },
       {
         text: '機能',
         items: [

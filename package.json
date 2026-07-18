@@ -1,8 +1,16 @@
 {
   "name": "jp.qsyi.qs-toolbox",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "displayName": "qsToolBox",
+  "description": "アバター改変効率化ツール",
   "unity": "2022.3",
+  "author": {
+    "name": "qsyi",
+    "url": "https://github.com/qsyi"
+  },
+  "license": "MIT-0",
+  "changelogUrl": "https://qsyi.github.io/qsToolbox/changelog",
+  "documentationUrl": "https://qsyi.github.io/qsToolbox/",
   "vpmDependencies": {
     "nadena.dev.modular-avatar": ">=1.10.0",
     "jp.lilxyzw.lilycalinventory": ">=1.5.2",

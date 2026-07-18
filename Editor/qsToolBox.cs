@@ -45,6 +45,12 @@ namespace qsyi
         private static FieldInfo _adjustChildPositionsField;
         private static bool _adjustChildPositionsResolved;
 
+        // スキャン対象フィルタ（探索対象エリアの⚙から変更、EditorPrefsでUnity/PC単位に永続化）
+        private const string PREF_SCAN_INCLUDE_EDITOR_ONLY = "qsToolBox.scanIncludeEditorOnly";
+        private const string PREF_SCAN_INCLUDE_INACTIVE    = "qsToolBox.scanIncludeInactive";
+        private bool _scanIncludeEditorOnly = false;
+        private bool _scanIncludeInactive   = true;
+
         // UI Toolkit
         private VisualElement[] _tabElements;
         private VisualElement[] _tabAccents;
@@ -62,11 +68,11 @@ namespace qsyi
         private ScrollView _materialScrollView;
         private VisualElement _menuPane;
 
-        private static readonly Color AccentColor       = new Color(0.30f, 0.60f, 1.00f, 1f);
-        private static Color PaneBorderColor   => EditorGUIUtility.isProSkin ? new Color(0.18f, 0.18f, 0.20f) : new Color(0.70f, 0.70f, 0.72f);
-        private static Color ChromeBorderColor => EditorGUIUtility.isProSkin ? new Color(0.13f, 0.13f, 0.13f) : new Color(0.60f, 0.60f, 0.60f);
-        private static Color TextColor         => EditorGUIUtility.isProSkin ? new Color(0.85f, 0.85f, 0.85f) : new Color(0.15f, 0.15f, 0.15f);
-        private static readonly Color DimColor = new Color(0.50f, 0.50f, 0.50f);
+        internal static readonly Color AccentColor       = new Color(0.30f, 0.60f, 1.00f, 1f);
+        internal static Color PaneBorderColor   => EditorGUIUtility.isProSkin ? new Color(0.18f, 0.18f, 0.20f) : new Color(0.70f, 0.70f, 0.72f);
+        internal static Color ChromeBorderColor => EditorGUIUtility.isProSkin ? new Color(0.13f, 0.13f, 0.13f) : new Color(0.60f, 0.60f, 0.60f);
+        internal static Color TextColor         => EditorGUIUtility.isProSkin ? new Color(0.85f, 0.85f, 0.85f) : new Color(0.15f, 0.15f, 0.15f);
+        internal static readonly Color DimColor = new Color(0.50f, 0.50f, 0.50f);
 
         private static readonly (string icon, string label, string tooltip)[] UITOOLKIT_TABS = {
             ("◧", "マテリアル",   "探索対象のマテリアルを置換できます"),
@@ -135,10 +141,23 @@ namespace qsyi
         private void OnEnable()
         {
             InitializeSerializedObject();
+            _scanIncludeEditorOnly = EditorPrefs.GetBool(PREF_SCAN_INCLUDE_EDITOR_ONLY, false);
+            _scanIncludeInactive   = EditorPrefs.GetBool(PREF_SCAN_INCLUDE_INACTIVE, true);
             EditorApplication.hierarchyChanged    += OnHierarchyChanged;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             Undo.undoRedoPerformed += OnUndoRedo;
             ScanData();
+        }
+
+        private void SetScanFilter(bool includeEditorOnly, bool includeInactive)
+        {
+            _scanIncludeEditorOnly = includeEditorOnly;
+            _scanIncludeInactive   = includeInactive;
+            EditorPrefs.SetBool(PREF_SCAN_INCLUDE_EDITOR_ONLY, _scanIncludeEditorOnly);
+            EditorPrefs.SetBool(PREF_SCAN_INCLUDE_INACTIVE, _scanIncludeInactive);
+            InvalidateContentCaches();
+            ScanData();
+            RebuildTargetChips();
         }
 
         private void OnDisable()
@@ -276,7 +295,7 @@ namespace qsyi
 
             foreach (var gameObject in _targets.Where(IsValidTarget))
             {
-                foreach (var smr in gameObject.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                foreach (var smr in gameObject.GetComponentsInChildren<SkinnedMeshRenderer>(_scanIncludeInactive))
                 {
                     if (smr.sharedMesh?.blendShapeCount > 0)
                         _skinnedMeshRenderers.Add(smr);
@@ -297,7 +316,7 @@ namespace qsyi
 
             foreach (var gameObject in _targets.Where(IsValidTarget))
             {
-                foreach (var renderer in gameObject.GetComponentsInChildren<Renderer>(true))
+                foreach (var renderer in gameObject.GetComponentsInChildren<Renderer>(_scanIncludeInactive))
                     ProcessRendererMaterials(renderer);
             }
 
@@ -316,7 +335,7 @@ namespace qsyi
 
         private void ProcessRendererMaterials(Renderer renderer)
         {
-            if (IsUnderEditorOnly(renderer.transform)) return;
+            if (!_scanIncludeEditorOnly && IsUnderEditorOnly(renderer.transform)) return;
             var materials = renderer.sharedMaterials;
             for (int i = 0; i < materials.Length; i++)
             {
@@ -333,7 +352,8 @@ namespace qsyi
             }
         }
 
-        private bool IsValidTarget(GameObject target) => target != null && !target.CompareTag("EditorOnly");
+        private bool IsValidTarget(GameObject target) =>
+            target != null && (_scanIncludeEditorOnly || !target.CompareTag("EditorOnly"));
 
         // ─── UI Toolkit ───────────────────────────────────────────────
 
@@ -588,6 +608,23 @@ namespace qsyi
             ctrlQHint.style.marginRight = 6;
             header.Add(ctrlQHint);
 
+            var filterBtn = new Button(() =>
+            {
+                var menu = new GenericMenu();
+                menu.AddItem(new GUIContent("EditorOnlyも含める"), _scanIncludeEditorOnly,
+                    () => SetScanFilter(!_scanIncludeEditorOnly, _scanIncludeInactive));
+                menu.AddItem(new GUIContent("非アクティブも含める"), _scanIncludeInactive,
+                    () => SetScanFilter(_scanIncludeEditorOnly, !_scanIncludeInactive));
+                menu.ShowAsContext();
+            });
+            filterBtn.text    = "フィルター";
+            filterBtn.tooltip = "スキャン対象フィルター（EditorOnly / 非アクティブの含め方を切り替えます）";
+            filterBtn.style.height       = 20;
+            filterBtn.style.fontSize     = 10;
+            filterBtn.style.marginRight  = 4;
+            filterBtn.style.paddingLeft  = filterBtn.style.paddingRight = 8;
+            header.Add(filterBtn);
+
             var rescanBtn = new Button(() => { ScanData(); RebuildTargetChips(); });
             rescanBtn.text    = "↺";
             rescanBtn.tooltip = "再スキャン";
@@ -597,11 +634,12 @@ namespace qsyi
             rescanBtn.style.paddingLeft  = rescanBtn.style.paddingRight = 0;
             header.Add(rescanBtn);
 
-            // ▶/▼ とラベルをクリックで折りたたみトグル（左クリックのみ、↺ボタン除外）
+            // ▶/▼ とラベルをクリックで折りたたみトグル（左クリックのみ、⚙/↺ボタン除外）
             header.RegisterCallback<MouseDownEvent>(evt =>
             {
                 if (evt.button != 0) return;
                 if (rescanBtn == evt.target || rescanBtn.Contains(evt.target as VisualElement)) return;
+                if (filterBtn == evt.target || filterBtn.Contains(evt.target as VisualElement)) return;
                 _targetAreaExpanded = !_targetAreaExpanded;
                 _targetFoldoutArrow.text = _targetAreaExpanded ? "▼" : "▶";
                 ApplyTargetAreaHeight();

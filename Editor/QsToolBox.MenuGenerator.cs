@@ -259,22 +259,25 @@ namespace qsyi
         private void ToggleMenuPreview()
         {
             if (_menuPreviewOriginalStates != null)
-            {
                 RestoreMenuPreview();
-                return;
-            }
+            else
+                ActivateMenuPreview();
+            UpdateMenuGenerateButton();
+        }
 
-            var entries = GetGeneratableMenuMeshEntries();
-            if (entries.Count == 0) return;
+        // プレビューをON状態にする。チェック済みが0件でも「ON状態」自体は保持し、
+        // 以降チェックされたメッシュを ApplyMenuPreviewForEntry が即座に隠せるようにする。
+        private void ActivateMenuPreview()
+        {
+            if (_menuPreviewOriginalStates != null) return;
 
             _menuPreviewOriginalStates = new Dictionary<SkinnedMeshRenderer, bool>();
-            foreach (var entry in entries)
+            foreach (var entry in GetGeneratableMenuMeshEntries())
             {
                 var go = entry.Renderer.gameObject;
                 _menuPreviewOriginalStates[entry.Renderer] = go.activeSelf;
                 go.SetActive(false);
             }
-            UpdateMenuGenerateButton();
         }
 
         private void RestoreMenuPreview()
@@ -421,6 +424,7 @@ namespace qsyi
                 ScanData();
                 foreach (var e in _menuMeshEntries.Where(e => e?.Renderer != null))
                     e.Include = false;
+                ActivateMenuPreview(); // プレビューはデフォルトONのため、生成後も継続してONへ戻す
                 RebuildMenuPane();
 
                 Selection.activeObject = folderObject;
@@ -747,6 +751,8 @@ namespace qsyi
             footer.Add(btnRow);
             pane.Add(footer);
 
+            // プレビューはデフォルトON。ウィンドウを開いた時点で一度だけ有効化しておく
+            ActivateMenuPreview();
             RebuildMenuPane();
             return pane;
         }
@@ -920,7 +926,7 @@ namespace qsyi
 
             var scannedRenderers = _targets
                 .Where(IsValidTarget)
-                .SelectMany(target => target.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                .SelectMany(target => target.GetComponentsInChildren<SkinnedMeshRenderer>(_scanIncludeInactive))
                 .Where(IsValidMenuRenderer)
                 .Distinct()
                 .ToList();

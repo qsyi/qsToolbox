@@ -39,8 +39,8 @@ features:
     link: /features/scale
     linkText: 使い方を見る
   - title: 顔改変後、まばたきが干渉してしまっている
-    details: まばたきをベースに選び、改変した目の形をマイナス値で追加して合成するだけで直せます。
-    link: /features/blendshape#使用例
+    details: 改変した目元とまばたきのシェイプキーを選んでワンクリックするだけで、瞼の突き抜けを自動で直せます。
+    link: /features/blendshape#まばたき修正モード
     linkText: 使い方を見る
 ---
 

@@ -43,7 +43,14 @@ export default defineConfig({
     ],
     outline: false,
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/qsyi/qsToolbox' }
+      { icon: 'github', link: 'https://github.com/qsyi/qsToolbox' },
+      {
+        icon: {
+          svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6 8V6a6 6 0 0 1 12 0v2h2a1 1 0 0 1 1 1l-1.2 11a2 2 0 0 1-2 1.8H6.2a2 2 0 0 1-2-1.8L3 9a1 1 0 0 1 1-1h2Zm2 0h8V6a4 4 0 0 0-8 0v2Z"/></svg>'
+        },
+        link: 'https://qsyi.booth.pm/',
+        ariaLabel: 'BOOTH'
+      }
     ]
   }
 })

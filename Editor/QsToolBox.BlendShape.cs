@@ -509,7 +509,8 @@ namespace qsyi
             overwriteRow.style.minHeight = 32;
             overwriteRow.style.marginBottom = 8;
 
-            var overwriteToggle = new Toggle("上書き");
+            var overwriteToggle = new Toggle("ベースを上書き");
+            overwriteToggle.tooltip = "ONの場合、ベースのシェイプキー自体を合成結果で上書きします。OFFの場合は新しいシェイプキーとして追加します（右側で名前を指定）。";
             overwriteToggle.value = _overwriteShape;
             overwriteToggle.style.flexShrink = 0;
             overwriteToggle.style.fontSize = 13;
@@ -962,26 +963,21 @@ namespace qsyi
             }
         }
 
+        // 絶対座標ではなく差分（デルタ）だけを積算する。originalMesh.vertices/normals/tangents は
+        // 足しても最後に引くだけで結果に影響しないため使わない（BlendShapeEditor等と同じ方式）。
+        // メッシュによってはこのプロパティが実際の頂点数と食い違う配列を返すことがあり、
+        // 不要なのに呼ぶとGetBlendShapeFrameVertices側でサイズ不一致エラーの原因になる。
         private (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) ComputeComposedDeltas(Mesh originalMesh, int baseIndex)
         {
-            var vertices = originalMesh.vertices;
-            var normals = originalMesh.normals;
-            var tangents = originalMesh.tangents;
-
-            var composedVertices = new Vector3[vertices.Length];
-            var composedNormals = new Vector3[normals.Length];
-            var composedTangents = new Vector3[tangents.Length];
-
-            System.Array.Copy(vertices, composedVertices, vertices.Length);
-            System.Array.Copy(normals, composedNormals, normals.Length);
-            for (int i = 0; i < tangents.Length; i++)
-                composedTangents[i] = tangents[i];
+            int vertexCount = originalMesh.vertexCount;
+            var composedVertices = new Vector3[vertexCount];
+            var composedNormals = new Vector3[vertexCount];
+            var composedTangents = new Vector3[vertexCount];
 
             ApplyBaseShapeDeltas(originalMesh, baseIndex, composedVertices, composedNormals, composedTangents);
             ApplyComposeShapeDeltas(originalMesh, composedVertices, composedNormals, composedTangents);
 
-            var finalDeltas = ComputeFinalDeltas(vertices, normals, tangents, composedVertices, composedNormals, composedTangents);
-            return finalDeltas;
+            return (composedVertices, composedNormals, composedTangents);
         }
 
         private void ApplyBaseShapeDeltas(Mesh mesh, int baseIndex, Vector3[] vertices, Vector3[] normals, Vector3[] tangents)
@@ -1038,24 +1034,6 @@ namespace qsyi
                 normals[i] += deltaNormals[i] * multiplier;
                 tangents[i] += deltaTangents[i] * multiplier;
             }
-        }
-
-        private (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) ComputeFinalDeltas(
-            Vector3[] originalVertices, Vector3[] originalNormals, Vector4[] originalTangents,
-            Vector3[] composedVertices, Vector3[] composedNormals, Vector3[] composedTangents)
-        {
-            var deltaVertices = new Vector3[originalVertices.Length];
-            var deltaNormals = new Vector3[originalNormals.Length];
-            var deltaTangents = new Vector3[originalTangents.Length];
-
-            for (int i = 0; i < originalVertices.Length; i++)
-            {
-                deltaVertices[i] = composedVertices[i] - originalVertices[i];
-                deltaNormals[i] = composedNormals[i] - originalNormals[i];
-                deltaTangents[i] = composedTangents[i] - new Vector3(originalTangents[i].x, originalTangents[i].y, originalTangents[i].z);
-            }
-
-            return (deltaVertices, deltaNormals, deltaTangents);
         }
 
         private static Mesh CreateMeshWithReplacedShape(Mesh mesh, Mesh originalMesh, string targetName, (Vector3[] vertices, Vector3[] normals, Vector3[] tangents) deltas)

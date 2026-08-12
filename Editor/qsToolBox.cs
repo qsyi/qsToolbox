@@ -22,8 +22,11 @@ namespace qsyi
         [SerializeField] private List<GameObject> _targets = new List<GameObject>();
         [SerializeField] private Transform _avatarArmature;
         [SerializeField] private List<OutfitArmatureEntry> _outfitArmatureEntries = new List<OutfitArmatureEntry>();
-        [SerializeField] private bool _autoSyncPosition;
-        [SerializeField] private bool _autoSyncRotation;
+        [SerializeField] private bool _autoSyncScaleAdjuster = true;
+        [SerializeField] private bool _autoSyncScale = true;
+        // 旧「Rotation も同期する（実験的）」の生Transformコピー用フラグとは意味が異なる
+        // （MAのForcePositionToBaseAvatarのAdjustRotation用）ため、同名で復元されるのを避けるため改名。
+        [SerializeField] private bool _autoSyncRotate = true;
         [SerializeField] private List<MenuMeshEntry> _menuMeshEntries = new List<MenuMeshEntry>();
 
         private Mode _mode = Mode.Material;

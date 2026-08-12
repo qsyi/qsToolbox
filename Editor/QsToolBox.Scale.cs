@@ -26,7 +26,8 @@ namespace qsyi
         private string        _selectedBoneName = "";
         private Label         _scaleSyncLabel;
         private Button        _scaleSyncButton;
-        private Toggle        _scalePosToggle;
+        private Toggle        _scaleAdjusterToggle;
+        private Toggle        _scaleScaleToggle;
         private Toggle        _scaleRotToggle;
         private bool          _scaleOutfitFoldoutExpanded = false;
         private readonly Dictionary<string, VisualElement> _scaleBoneRows = new Dictionary<string, VisualElement>();
@@ -171,18 +172,35 @@ namespace qsyi
             toggleColumn.style.flexDirection = FlexDirection.Column;
             toggleColumn.style.flexGrow      = 1;
 
-            _scalePosToggle = new Toggle("Position も同期する（実験的）");
-            _scalePosToggle.value            = _autoSyncPosition;
-            _scalePosToggle.style.fontSize   = 12;
-            _scalePosToggle.style.marginBottom = 2;
-            _scalePosToggle.RegisterValueChangedCallback(evt => _autoSyncPosition = evt.newValue);
-            toggleColumn.Add(_scalePosToggle);
+            _scaleAdjusterToggle = new Toggle("ScaleAdjusterを同期");
+            _scaleAdjusterToggle.tooltip = "MAの「ScaleAdjusterを一致させる」と同じ処理で、衣装のScaleAdjusterを素体に合わせます";
+            _scaleAdjusterToggle.value            = _autoSyncScaleAdjuster;
+            _scaleAdjusterToggle.style.fontSize   = 12;
+            _scaleAdjusterToggle.style.marginBottom = 2;
+            _scaleAdjusterToggle.RegisterValueChangedCallback(evt => _autoSyncScaleAdjuster = evt.newValue);
+            toggleColumn.Add(_scaleAdjusterToggle);
 
-            _scaleRotToggle = new Toggle("Rotation も同期する（実験的）");
-            _scaleRotToggle.value          = _autoSyncRotation;
+            _scaleScaleToggle = new Toggle("スケールを同期");
+            _scaleScaleToggle.tooltip = "MAの「位置をもとアバターに合わせてリセット」のスケールを合わせるオプションと同じ処理です";
+            _scaleScaleToggle.value            = _autoSyncScale;
+            _scaleScaleToggle.style.fontSize   = 12;
+            _scaleScaleToggle.style.marginBottom = 2;
+            _scaleScaleToggle.RegisterValueChangedCallback(evt => _autoSyncScale = evt.newValue);
+            toggleColumn.Add(_scaleScaleToggle);
+
+            _scaleRotToggle = new Toggle("回転も同期");
+            _scaleRotToggle.tooltip = "MAの「位置をもとアバターに合わせてリセット」の回転を合わせるオプションと同じ処理です";
+            _scaleRotToggle.value          = _autoSyncRotate;
             _scaleRotToggle.style.fontSize = 12;
-            _scaleRotToggle.RegisterValueChangedCallback(evt => _autoSyncRotation = evt.newValue);
+            _scaleRotToggle.style.marginBottom = 2;
+            _scaleRotToggle.RegisterValueChangedCallback(evt => _autoSyncRotate = evt.newValue);
             toggleColumn.Add(_scaleRotToggle);
+
+            var positionResetCaption = new Label("スケールまたは回転を同期すると、衣装ボーンの位置も基準アバターに合わせてリセットされます");
+            positionResetCaption.style.fontSize = 10;
+            positionResetCaption.style.color = DimColor;
+            positionResetCaption.style.whiteSpace = WhiteSpace.Normal;
+            toggleColumn.Add(positionResetCaption);
 
             footer.Add(toggleColumn);
 
@@ -316,6 +334,41 @@ namespace qsyi
                 w.style.marginTop = 4;
                 _scaleWarnings.Add(w);
             }
+
+            // 「一括同期」の対象になれるか＝MAの厳密なマッピング基準（HasValidMergeArmature）で判定する。
+            // _avatarBones/_outfitBonesはBONE_ORDER（主要ボーンのみ）に絞った表示用の対応付けなので、
+            // それらが空でも実際にはMergeArmatureが有効な衣装があり得る（例：単一の非定番ボーンにのみ
+            // マージするアクセサリ等）。同期可否の判定に流用しない。
+            var outfitsWithoutMergeArmature = new List<string>();
+            bool hasSyncableOutfit = false;
+            foreach (var outfit in outfitTargets)
+            {
+                var armatures = ResolveOutfitArmatures(outfit);
+                if (armatures.Count == 0) continue; // 未設定は上の「衣装のボーンが見つかりません」でカバー済み
+                if (armatures.Any(HasValidMergeArmature))
+                    hasSyncableOutfit = true;
+                else
+                    outfitsWithoutMergeArmature.Add(outfit.name);
+            }
+            if (outfitsWithoutMergeArmature.Count > 0)
+            {
+                var w = new HelpBox(
+                    $"MA Merge Armatureが設定されていない衣装があります（{string.Join(", ", outfitsWithoutMergeArmature)}）。一括同期が効きません。",
+                    HelpBoxMessageType.Warning);
+                w.style.marginLeft = w.style.marginRight = 10;
+                w.style.marginTop = 4;
+                _scaleWarnings.Add(w);
+            }
+
+            bool maToolsAvailable = IsMergeArmatureToolsAvailable();
+            if (!maToolsAvailable)
+            {
+                var w = new HelpBox("Modular Avatarのバージョンが古いか非対応のため、一括同期を利用できません。", HelpBoxMessageType.Error);
+                w.style.marginLeft = w.style.marginRight = 10;
+                w.style.marginTop = 4;
+                _scaleWarnings.Add(w);
+            }
+
             _scaleWarnings.style.display = _scaleWarnings.childCount > 0
                 ? DisplayStyle.Flex : DisplayStyle.None;
 
@@ -410,7 +463,7 @@ namespace qsyi
 
             RebuildScaleBoneDetail();
 
-            bool canSync = hasAvatarBones && hasOutfitBones && !EditorApplication.isPlaying;
+            bool canSync = hasSyncableOutfit && maToolsAvailable && !EditorApplication.isPlaying;
             _scaleSyncButton?.SetEnabled(canSync);
         }
 
@@ -515,11 +568,6 @@ namespace qsyi
                    Mathf.Approximately(a.z, b.z);
         }
 
-        private static bool Approximately(Quaternion a, Quaternion b)
-        {
-            return Quaternion.Angle(a, b) < 0.01f;
-        }
-
         private static bool IsAdjustChildPositionsEnabled()
         {
             if (!_adjustChildPositionsResolved)
@@ -557,6 +605,112 @@ namespace qsyi
             catch
             {
                 return true;
+            }
+        }
+
+        // ── MA MergeArmatureInspectorTools（internal）へのリフレクション ──
+        // 「一括同期」はMA本体の「ScaleAdjusterを一致させる」「位置をもとアバターに合わせてリセット」と
+        // 同じ処理を呼び出す。両メソッドともinternalなため直接参照はできず、一度だけ解決してキャッシュする。
+        private static bool _maToolsResolved;
+        private static MethodInfo _maMatchScaleAdjustersMethod;
+        private static MethodInfo _maForcePositionMethod;
+        private static Type _maOptionsType;
+        private static FieldInfo _maOptAdjustScaleField;
+        private static FieldInfo _maOptAdjustRotationField;
+
+        private static void ResolveMergeArmatureTools()
+        {
+            if (_maToolsResolved) return;
+            _maToolsResolved = true;
+
+            var toolsType = global::System.Type.GetType(
+                "nadena.dev.modular_avatar.core.editor.MergeArmatureInspectorTools, nadena.dev.modular-avatar.core.editor");
+            var optionsType = global::System.Type.GetType(
+                "nadena.dev.modular_avatar.core.editor.MergeArmaturePositionResetOptions, nadena.dev.modular-avatar.core.editor");
+
+            if (toolsType == null || optionsType == null)
+            {
+                foreach (var assembly in global::System.AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (toolsType == null)
+                        toolsType = assembly.GetType("nadena.dev.modular_avatar.core.editor.MergeArmatureInspectorTools");
+                    if (optionsType == null)
+                        optionsType = assembly.GetType("nadena.dev.modular_avatar.core.editor.MergeArmaturePositionResetOptions");
+                    if (toolsType != null && optionsType != null) break;
+                }
+            }
+
+            if (toolsType == null || optionsType == null)
+            {
+                Debug.LogWarning("[qsToolBox] Modular Avatarの MergeArmatureInspectorTools が見つかりませんでした。一括同期は利用できません。");
+                return;
+            }
+
+            _maOptionsType = optionsType;
+            _maMatchScaleAdjustersMethod = toolsType.GetMethod(
+                "MatchScaleAdjusters", BindingFlags.NonPublic | BindingFlags.Static, null, new[] { typeof(Transform) }, null);
+            _maForcePositionMethod = toolsType.GetMethod(
+                "ForcePositionToBaseAvatar", BindingFlags.NonPublic | BindingFlags.Static, null, new[] { typeof(Transform), optionsType }, null);
+            _maOptAdjustScaleField = optionsType.GetField("AdjustScale", BindingFlags.Public | BindingFlags.Instance);
+            _maOptAdjustRotationField = optionsType.GetField("AdjustRotation", BindingFlags.Public | BindingFlags.Instance);
+
+            if (_maMatchScaleAdjustersMethod == null || _maForcePositionMethod == null ||
+                _maOptAdjustScaleField == null || _maOptAdjustRotationField == null)
+            {
+                Debug.LogWarning("[qsToolBox] Modular Avatarの MergeArmatureInspectorTools のAPI形状が想定と異なります。一括同期は利用できません。");
+                _maMatchScaleAdjustersMethod = null;
+                _maForcePositionMethod = null;
+            }
+        }
+
+        private static bool IsMergeArmatureToolsAvailable()
+        {
+            ResolveMergeArmatureTools();
+            return _maMatchScaleAdjustersMethod != null && _maForcePositionMethod != null;
+        }
+
+        // armatureRoot配下に、有効なマージ対象を持つModularAvatarMergeArmatureが1つでもあるか（public API、リフレクション不要）。
+        private static bool HasValidMergeArmature(Transform armatureRoot)
+        {
+            if (armatureRoot == null) return false;
+            return armatureRoot.GetComponentsInChildren<ModularAvatarMergeArmature>(true)
+                .Any(m => m.mergeTarget != null && m.mergeTarget.Get(m) != null);
+        }
+
+        // MAの「ScaleAdjusterを一致させる」ボタンと同じ処理。ScaleAdjusterコンポーネントの値のみ合わせる。
+        private static void MatchOutfitScaleAdjusters(Transform armatureRoot)
+        {
+            ResolveMergeArmatureTools();
+            if (_maMatchScaleAdjustersMethod == null || armatureRoot == null) return;
+
+            try
+            {
+                _maMatchScaleAdjustersMethod.Invoke(null, new object[] { armatureRoot });
+            }
+            catch (TargetInvocationException e)
+            {
+                Debug.LogError($"[qsToolBox] MatchScaleAdjusters呼び出しでエラーが発生しました: {e.InnerException ?? e}");
+            }
+        }
+
+        // MAの「位置をもとアバターに合わせてリセット」実行ボタンと同じ処理。位置は常にリセットされ、
+        // スケール・回転は引数で指定した場合のみ合わせる。ConvertATPose/HeuristicRootScaleはMAの
+        // デフォルト値（true）のまま変更しない。
+        private static void ForceOutfitPositionToAvatar(Transform armatureRoot, bool adjustScale, bool adjustRotation)
+        {
+            ResolveMergeArmatureTools();
+            if (_maForcePositionMethod == null || _maOptionsType == null || armatureRoot == null) return;
+
+            try
+            {
+                var options = global::System.Activator.CreateInstance(_maOptionsType);
+                _maOptAdjustScaleField.SetValue(options, adjustScale);
+                _maOptAdjustRotationField.SetValue(options, adjustRotation);
+                _maForcePositionMethod.Invoke(null, new object[] { armatureRoot, options });
+            }
+            catch (TargetInvocationException e)
+            {
+                Debug.LogError($"[qsToolBox] ForcePositionToBaseAvatar呼び出しでエラーが発生しました: {e.InnerException ?? e}");
             }
         }
 
@@ -607,92 +761,37 @@ namespace qsyi
             return Mathf.Abs(denominator) < 0.000001f ? 1f : numerator / denominator;
         }
 
+        // MA本体の「ScaleAdjusterを一致させる」「位置をもとアバターに合わせてリセット」を
+        // 各衣装のアーマチュアRootに対して呼び出す（自前でのボーン走査・値コピーは行わない）。
         private void ApplyAvatarScalesToOutfits()
         {
-            if (_avatarBones.Count == 0 || _outfitBones.Count == 0)
+            if (_targets.Count == 0)
                 return;
 
             Undo.SetCurrentGroupName("Sync Bones");
             int undoGroup = Undo.GetCurrentGroup();
-            bool hasAnyChange = false;
 
             try
             {
-                foreach (var boneName in BONE_ORDER)
+                foreach (var outfit in _targets.Where(t => t != null))
+                foreach (var armature in ResolveOutfitArmatures(outfit))
                 {
-                    if (!_avatarBones.TryGetValue(boneName, out var avatarBone) || avatarBone == null)
-                        continue;
+                    if (armature == null) continue;
 
-                    var avatarAdjuster = avatarBone.GetComponent<ModularAvatarScaleAdjuster>();
-                    Vector3 avatarLocalScale = avatarBone.localScale;
-                    Vector3 avatarLocalPosition = avatarBone.localPosition;
-                    Quaternion avatarLocalRotation = avatarBone.localRotation;
+                    if (_autoSyncScaleAdjuster)
+                        MatchOutfitScaleAdjusters(armature);
 
-                    foreach (var outfit in _targets.Where(t => t != null))
-                    {
-                        if (!_outfitBones.TryGetValue(outfit, out var boneMap) ||
-                            !boneMap.TryGetValue(boneName, out var outfitBone) ||
-                            outfitBone == null ||
-                            outfitBone == avatarBone)
-                            continue;
-
-                        if (!Approximately(outfitBone.localScale, avatarLocalScale))
-                        {
-                            Undo.RecordObject(outfitBone, "Auto Sync Transform Scale");
-                            outfitBone.localScale = avatarLocalScale;
-                            EditorUtility.SetDirty(outfitBone);
-                            hasAnyChange = true;
-                        }
-
-                        if (_autoSyncPosition)
-                        {
-                            if (!Approximately(outfitBone.localPosition, avatarLocalPosition))
-                            {
-                                Undo.RecordObject(outfitBone, "Auto Sync Transform Position");
-                                outfitBone.localPosition = avatarLocalPosition;
-                                EditorUtility.SetDirty(outfitBone);
-                                hasAnyChange = true;
-                            }
-                        }
-
-                        if (_autoSyncRotation)
-                        {
-                            if (!Approximately(outfitBone.localRotation, avatarLocalRotation))
-                            {
-                                Undo.RecordObject(outfitBone, "Auto Sync Transform Rotation");
-                                outfitBone.localRotation = avatarLocalRotation;
-                                EditorUtility.SetDirty(outfitBone);
-                                hasAnyChange = true;
-                            }
-                        }
-
-                        if (avatarAdjuster == null)
-                            continue;
-
-                        var outfitAdjuster = outfitBone.GetComponent<ModularAvatarScaleAdjuster>();
-                        if (outfitAdjuster == null)
-                        {
-                            outfitAdjuster = Undo.AddComponent<ModularAvatarScaleAdjuster>(outfitBone.gameObject);
-                            hasAnyChange = true;
-                        }
-
-                        if (!Approximately(outfitAdjuster.Scale, avatarAdjuster.Scale))
-                        {
-                            hasAnyChange |= ApplyScaleAdjusterScale(
-                                outfitAdjuster,
-                                avatarAdjuster.Scale,
-                                true,
-                                "Auto Sync ScaleAdjuster");
-                        }
-                    }
+                    if (_autoSyncScale || _autoSyncRotate)
+                        ForceOutfitPositionToAvatar(armature, _autoSyncScale, _autoSyncRotate);
                 }
-
-                if (hasAnyChange)
-                    Undo.CollapseUndoOperations(undoGroup);
             }
             catch (System.Exception e)
             {
                 Debug.LogError($"[qsToolBox] Sync error: {e}");
+            }
+            finally
+            {
+                Undo.CollapseUndoOperations(undoGroup);
             }
         }
 
@@ -714,19 +813,7 @@ namespace qsyi
                 var armatures = ResolveOutfitArmatures(outfit);
                 if (armatures.Count > 0)
                 {
-                    var boneMap = new Dictionary<string, Transform>();
-                    foreach (var armature in armatures)
-                    {
-                        var partialBoneMap = new Dictionary<string, Transform>();
-                        BuildBoneMap(armature, partialBoneMap);
-
-                        foreach (var kv in partialBoneMap)
-                        {
-                            if (!boneMap.ContainsKey(kv.Key))
-                                boneMap[kv.Key] = kv.Value;
-                        }
-                    }
-
+                    var boneMap = BuildOutfitBoneMapFromMergeArmature(armatures);
                     if (boneMap.Count > 0)
                         _outfitBones[outfit] = boneMap;
                 }
@@ -741,6 +828,45 @@ namespace qsyi
             }
 
             return HashChanged(h, ref _lastBonesHash);
+        }
+
+        // 衣装ボーンの検出はMA公式のModularAvatarMergeArmature.GetBonesMapping()（public API）のみを使う。
+        // フォールバックは行わない：マッピングに無いボーンはそのまま未検出として扱う
+        // （「一括同期」が実際に触るボーンと一覧・差分表示を常に一致させるため）。
+        private Dictionary<string, Transform> BuildOutfitBoneMapFromMergeArmature(List<Transform> armatures)
+        {
+            var avatarToOutfit = new Dictionary<Transform, Transform>();
+            foreach (var armature in armatures)
+            {
+                if (armature == null) continue;
+
+                foreach (var mergeArmature in armature.GetComponentsInChildren<ModularAvatarMergeArmature>(true))
+                {
+                    if (mergeArmature.mergeTarget == null || mergeArmature.mergeTarget.Get(mergeArmature) == null)
+                        continue;
+
+                    var mapping = mergeArmature.GetBonesMapping();
+                    if (mapping == null) continue;
+
+                    foreach (var (avatarBone, outfitBone) in mapping)
+                    {
+                        if (avatarBone != null && outfitBone != null && !avatarToOutfit.ContainsKey(avatarBone))
+                            avatarToOutfit[avatarBone] = outfitBone;
+                    }
+                }
+            }
+
+            var boneMap = new Dictionary<string, Transform>();
+            foreach (var boneName in BONE_ORDER)
+            {
+                if (_avatarBones.TryGetValue(boneName, out var avatarBone) &&
+                    avatarBone != null &&
+                    avatarToOutfit.TryGetValue(avatarBone, out var outfitBone))
+                {
+                    boneMap[boneName] = outfitBone;
+                }
+            }
+            return boneMap;
         }
 
         private OutfitArmatureEntry GetOrCreateOutfitArmatureEntry(GameObject outfit)

@@ -250,7 +250,7 @@ namespace qsyi
 
             // Outfit armature rows
             _scaleOutfitRows.Clear();
-            var outfitTargets = _targets.Where(t => t != null).ToList();
+            var outfitTargets = _targets.Where(t => t != null && !IsSourceAvatarSelf(t)).ToList();
 
             VisualElement rowsParent = _scaleOutfitRows;
             if (outfitTargets.Count > 1)
@@ -312,10 +312,10 @@ namespace qsyi
             bool hasAvatarBones = _avatarBones.Count > 0;
 
             bool isValidTarget = _targets.Count > 0 &&
-                _targets.All(t => t?.GetComponent<ModularAvatarMeshSettings>() != null);
+                _targets.All(t => t?.GetComponent<ModularAvatarMeshSettings>() != null || IsAvatarTarget(t));
             if (!isValidTarget && _targets.Count > 0)
             {
-                var w = new HelpBox("SetupOutfitした衣装を入れてください。", HelpBoxMessageType.Error);
+                var w = new HelpBox("SetupOutfitした衣装、またはアバターを入れてください。", HelpBoxMessageType.Error);
                 w.style.marginLeft = w.style.marginRight = 10;
                 w.style.marginTop = 4;
                 _scaleWarnings.Add(w);
@@ -335,25 +335,46 @@ namespace qsyi
                 _scaleWarnings.Add(w);
             }
 
-            // 「一括同期」の対象になれるか＝MAの厳密なマッピング基準（HasValidMergeArmature）で判定する。
+            // 「一括同期」の対象になれるか＝MAの厳密なマッピング基準（HasValidMergeArmature）で判定する
+            // （アバターターゲットはMergeArmature不要のため、アーマチュアが解決できていれば無条件でOK）。
             // _avatarBones/_outfitBonesはBONE_ORDER（主要ボーンのみ）に絞った表示用の対応付けなので、
             // それらが空でも実際にはMergeArmatureが有効な衣装があり得る（例：単一の非定番ボーンにのみ
             // マージするアクセサリ等）。同期可否の判定に流用しない。
             var outfitsWithoutMergeArmature = new List<string>();
             bool hasSyncableOutfit = false;
+            bool hasAvatarTargetWithoutBase = false;
             foreach (var outfit in outfitTargets)
             {
                 var armatures = ResolveOutfitArmatures(outfit);
                 if (armatures.Count == 0) continue; // 未設定は上の「衣装のボーンが見つかりません」でカバー済み
-                if (armatures.Any(HasValidMergeArmature))
+
+                if (IsAvatarTarget(outfit))
+                {
+                    if (_avatarArmature == null) hasAvatarTargetWithoutBase = true;
+                    else hasSyncableOutfit = true;
+                }
+                else if (armatures.Any(HasValidMergeArmature))
+                {
                     hasSyncableOutfit = true;
+                }
                 else
+                {
                     outfitsWithoutMergeArmature.Add(outfit.name);
+                }
             }
             if (outfitsWithoutMergeArmature.Count > 0)
             {
                 var w = new HelpBox(
                     $"MA Merge Armatureが設定されていない衣装があります（{string.Join(", ", outfitsWithoutMergeArmature)}）。一括同期が効きません。",
+                    HelpBoxMessageType.Warning);
+                w.style.marginLeft = w.style.marginRight = 10;
+                w.style.marginTop = 4;
+                _scaleWarnings.Add(w);
+            }
+            if (hasAvatarTargetWithoutBase)
+            {
+                var w = new HelpBox(
+                    "アバター同士のコピーには「素体 Armature」の指定が必要です。",
                     HelpBoxMessageType.Warning);
                 w.style.marginLeft = w.style.marginRight = 10;
                 w.style.marginTop = 4;
@@ -714,6 +735,437 @@ namespace qsyi
             }
         }
 
+        // ── アバター間の直接コピー（MergeArmatureコンポーネント不要） ──
+        // アバター同士は通常MergeArmature関係を持たない上、AvatarObjectReference.Get()は参照を持つ
+        // コンポーネント自身が属するアバターを起点に再解決する設計のため、一時的にMergeArmatureを
+        // 付けても独立した2アバター間では正しく参照できない（Runtime/AvatarObjectReference.cs）。
+        // そのため、MAのGetBonesMapping()/MatchScaleAdjusters/ForcePositionToBaseAvatarの中身の
+        // アルゴリズムだけをコンポーネント無しで再現する。AT-poseへの変換・アーマチュア全体の
+        // 腕の長さ比スケールは含めない（対象はスコープ外）。
+
+        // MAのHeuristicBoneMapper.boneNamePatternsをそのまま移植した別名テーブル（コンポーネント不要版）。
+        // 出典: https://github.com/HhotateA/AvatarModifyTools （Copyright (c) 2021 @HhotateA_xR, MIT License）
+        //       https://github.com/Azukimochi/BoneRenamer （Copyright (c) 2023 Azukimochi, MIT License）
+        private static readonly string[][] BONE_ALIAS_GROUPS = new[]
+        {
+            new[] {"Hips", "Hip", "pelvis"},
+            new[]
+            {
+                "LeftUpperLeg", "UpperLeg_Left", "UpperLeg_L", "Leg_Left", "Leg_L", "ULeg_L", "Left leg", "LeftUpLeg",
+                "UpLeg.L", "Thigh_L"
+            },
+            new[]
+            {
+                "RightUpperLeg", "UpperLeg_Right", "UpperLeg_R", "Leg_Right", "Leg_R", "ULeg_R", "Right leg",
+                "RightUpLeg", "UpLeg.R", "Thigh_R"
+            },
+            new[]
+            {
+                "LeftLowerLeg", "LowerLeg_Left", "LowerLeg_L", "Knee_Left", "Knee_L", "LLeg_L", "Left knee", "LeftLeg", "leg_L", "shin.L"
+            },
+            new[]
+            {
+                "RightLowerLeg", "LowerLeg_Right", "LowerLeg_R", "Knee_Right", "Knee_R", "LLeg_R", "Right knee",
+                "RightLeg", "leg_R", "shin.R"
+            },
+            new[] {"LeftFoot", "Foot_Left", "Foot_L", "Ankle_L", "Foot.L.001", "Left ankle", "heel.L", "heel"},
+            new[] {"RightFoot", "Foot_Right", "Foot_R", "Ankle_R", "Foot.R.001", "Right ankle", "heel.R", "heel"},
+            new[] {"Spine", "spine01"},
+            new[] {"Chest", "Bust", "spine02", "upper_chest"},
+            new[] {"Neck"},
+            new[] {"Head"},
+            new[] {"LeftShoulder", "Shoulder_Left", "Shoulder_L"},
+            new[] {"RightShoulder", "Shoulder_Right", "Shoulder_R"},
+            new[]
+            {
+                "LeftUpperArm", "UpperArm_Left", "UpperArm_L", "Arm_Left", "Arm_L", "UArm_L", "Left arm", "UpperLeftArm"
+            },
+            new[]
+            {
+                "RightUpperArm", "UpperArm_Right", "UpperArm_R", "Arm_Right", "Arm_R", "UArm_R", "Right arm",
+                "UpperRightArm"
+            },
+            new[] {"LeftLowerArm", "LowerArm_Left", "LowerArm_L", "LArm_L", "Left elbow", "LeftForeArm", "Elbow_L", "forearm_L", "ForArm_L"},
+            new[] {"RightLowerArm", "LowerArm_Right", "LowerArm_R", "LArm_R", "Right elbow", "RightForeArm", "Elbow_R", "forearm_R", "ForArm_R"},
+            new[] {"LeftHand", "Hand_Left", "Hand_L", "Left wrist", "Wrist_L"},
+            new[] {"RightHand", "Hand_Right", "Hand_R", "Right wrist", "Wrist_R"},
+            new[]
+            {
+                "LeftToes", "Toes_Left", "Toe_Left", "ToeIK_L", "Toes_L", "Toe_L", "Foot.L.002", "Left Toe",
+                "LeftToeBase"
+            },
+            new[]
+            {
+                "RightToes", "Toes_Right", "Toe_Right", "ToeIK_R", "Toes_R", "Toe_R", "Foot.R.002", "Right Toe",
+                "RightToeBase"
+            },
+            new[] {"LeftEye", "Eye_Left", "Eye_L"},
+            new[] {"RightEye", "Eye_Right", "Eye_R"},
+            new[] {"Jaw"},
+            new[]
+            {
+                "LeftThumbProximal", "ProximalThumb_Left", "ProximalThumb_L", "Thumb1_L", "ThumbFinger1_L",
+                "LeftHandThumb1", "Thumb Proximal.L", "Thunb1_L", "finger01_01_L"
+            },
+            new[]
+            {
+                "LeftThumbIntermediate", "IntermediateThumb_Left", "IntermediateThumb_L", "Thumb2_L", "ThumbFinger2_L",
+                "LeftHandThumb2", "Thumb Intermediate.L", "Thunb2_L", "finger01_02_L"
+            },
+            new[]
+            {
+                "LeftThumbDistal", "DistalThumb_Left", "DistalThumb_L", "Thumb3_L", "ThumbFinger3_L", "LeftHandThumb3",
+                "Thumb Distal.L", "Thunb3_L", "finger01_03_L"
+            },
+            new[]
+            {
+                "LeftIndexProximal", "ProximalIndex_Left", "ProximalIndex_L", "Index1_L", "IndexFinger1_L",
+                "LeftHandIndex1", "Index Proximal.L", "finger02_01_L", "f_index.01.L"
+            },
+            new[]
+            {
+                "LeftIndexIntermediate", "IntermediateIndex_Left", "IntermediateIndex_L", "Index2_L", "IndexFinger2_L",
+                "LeftHandIndex2", "Index Intermediate.L", "finger02_02_L", "f_index.02.L"
+            },
+            new[]
+            {
+                "LeftIndexDistal", "DistalIndex_Left", "DistalIndex_L", "Index3_L", "IndexFinger3_L", "LeftHandIndex3",
+                "Index Distal.L", "finger02_03_L", "f_index.03.L"
+            },
+            new[]
+            {
+                "LeftMiddleProximal", "ProximalMiddle_Left", "ProximalMiddle_L", "Middle1_L", "MiddleFinger1_L",
+                "LeftHandMiddle1", "Middle Proximal.L", "finger03_01_L", "f_middle.01.L"
+            },
+            new[]
+            {
+                "LeftMiddleIntermediate", "IntermediateMiddle_Left", "IntermediateMiddle_L", "Middle2_L",
+                "MiddleFinger2_L", "LeftHandMiddle2", "Middle Intermediate.L", "finger03_02_L", "f_middle.02.L"
+            },
+            new[]
+            {
+                "LeftMiddleDistal", "DistalMiddle_Left", "DistalMiddle_L", "Middle3_L", "MiddleFinger3_L",
+                "LeftHandMiddle3", "Middle Distal.L", "finger03_03_L", "f_middle.03.L"
+            },
+            new[]
+            {
+                "LeftRingProximal", "ProximalRing_Left", "ProximalRing_L", "Ring1_L", "RingFinger1_L", "LeftHandRing1",
+                "Ring Proximal.L", "finger04_01_L", "f_ring.01.L"
+            },
+            new[]
+            {
+                "LeftRingIntermediate", "IntermediateRing_Left", "IntermediateRing_L", "Ring2_L", "RingFinger2_L",
+                "LeftHandRing2", "Ring Intermediate.L", "finger04_02_L", "f_ring.02.L"
+            },
+            new[]
+            {
+                "LeftRingDistal", "DistalRing_Left", "DistalRing_L", "Ring3_L", "RingFinger3_L", "LeftHandRing3",
+                "Ring Distal.L", "finger04_03_L", "f_ring.03.L"
+            },
+            new[]
+            {
+                "LeftLittleProximal", "ProximalLittle_Left", "ProximalLittle_L", "Little1_L", "LittleFinger1_L",
+                "LeftHandPinky1", "Little Proximal.L", "finger05_01_L", "f_pinky.01.L", "Pinky1.L"
+            },
+            new[]
+            {
+                "LeftLittleIntermediate", "IntermediateLittle_Left", "IntermediateLittle_L", "Little2_L",
+                "LittleFinger2_L", "LeftHandPinky2", "Little Intermediate.L", "finger05_02_L", "f_pinky.02.L", "Pinky2.L"
+            },
+            new[]
+            {
+                "LeftLittleDistal", "DistalLittle_Left", "DistalLittle_L", "Little3_L", "LittleFinger3_L",
+                "LeftHandPinky3", "Little Distal.L", "finger05_03_L", "f_pinky.03.L", "Pinky3.L"
+            },
+            new[]
+            {
+                "RightThumbProximal", "ProximalThumb_Right", "ProximalThumb_R", "Thumb1_R", "ThumbFinger1_R",
+                "RightHandThumb1", "Thumb Proximal.R", "Thunb1_R", "finger01_01_R"
+            },
+            new[]
+            {
+                "RightThumbIntermediate", "IntermediateThumb_Right", "IntermediateThumb_R", "Thumb2_R",
+                "ThumbFinger2_R", "RightHandThumb2", "Thumb Intermediate.R", "Thunb2_R", "finger01_02_R"
+            },
+            new[]
+            {
+                "RightThumbDistal", "DistalThumb_Right", "DistalThumb_R", "Thumb3_R", "ThumbFinger3_R",
+                "RightHandThumb3", "Thumb Distal.R", "Thunb3_R", "finger01_03_R"
+            },
+            new[]
+            {
+                "RightIndexProximal", "ProximalIndex_Right", "ProximalIndex_R", "Index1_R", "IndexFinger1_R",
+                "RightHandIndex1", "Index Proximal.R", "finger02_01_R", "f_index.01.R"
+            },
+            new[]
+            {
+                "RightIndexIntermediate", "IntermediateIndex_Right", "IntermediateIndex_R", "Index2_R",
+                "IndexFinger2_R", "RightHandIndex2", "Index Intermediate.R", "finger02_02_R", "f_index.02.R"
+            },
+            new[]
+            {
+                "RightIndexDistal", "DistalIndex_Right", "DistalIndex_R", "Index3_R", "IndexFinger3_R",
+                "RightHandIndex3", "Index Distal.R", "finger02_03_R", "f_index.03.R"
+            },
+            new[]
+            {
+                "RightMiddleProximal", "ProximalMiddle_Right", "ProximalMiddle_R", "Middle1_R", "MiddleFinger1_R",
+                "RightHandMiddle1", "Middle Proximal.R", "finger03_01_R", "f_middle.01.R"
+            },
+            new[]
+            {
+                "RightMiddleIntermediate", "IntermediateMiddle_Right", "IntermediateMiddle_R", "Middle2_R",
+                "MiddleFinger2_R", "RightHandMiddle2", "Middle Intermediate.R", "finger03_02_R", "f_middle.02.R"
+            },
+            new[]
+            {
+                "RightMiddleDistal", "DistalMiddle_Right", "DistalMiddle_R", "Middle3_R", "MiddleFinger3_R",
+                "RightHandMiddle3", "Middle Distal.R", "finger03_03_R", "f_middle.03.R"
+            },
+            new[]
+            {
+                "RightRingProximal", "ProximalRing_Right", "ProximalRing_R", "Ring1_R", "RingFinger1_R",
+                "RightHandRing1", "Ring Proximal.R", "finger04_01_R", "f_ring.01.R"
+            },
+            new[]
+            {
+                "RightRingIntermediate", "IntermediateRing_Right", "IntermediateRing_R", "Ring2_R", "RingFinger2_R",
+                "RightHandRing2", "Ring Intermediate.R", "finger04_02_R", "f_ring.02.R"
+            },
+            new[]
+            {
+                "RightRingDistal", "DistalRing_Right", "DistalRing_R", "Ring3_R", "RingFinger3_R", "RightHandRing3",
+                "Ring Distal.R", "finger04_03_R", "f_ring.03.R"
+            },
+            new[]
+            {
+                "RightLittleProximal", "ProximalLittle_Right", "ProximalLittle_R", "Little1_R", "LittleFinger1_R",
+                "RightHandPinky1", "Little Proximal.R", "finger05_01_R", "f_pinky.01.R", "Pinky1.R"
+            },
+            new[]
+            {
+                "RightLittleIntermediate", "IntermediateLittle_Right", "IntermediateLittle_R", "Little2_R",
+                "LittleFinger2_R", "RightHandPinky2", "Little Intermediate.R", "finger05_02_R", "f_pinky.02.R", "Pinky2.R"
+            },
+            new[]
+            {
+                "RightLittleDistal", "DistalLittle_Right", "DistalLittle_R", "Little3_R", "LittleFinger3_R",
+                "RightHandPinky3", "Little Distal.R", "finger05_03_R", "f_pinky.03.R", "Pinky3.R"
+            },
+            new[] {"UpperChest", "UChest"},
+        };
+
+        private static string NormalizeAliasName(string name)
+        {
+            name = name.ToLowerInvariant();
+            name = System.Text.RegularExpressions.Regex.Replace(name, "^bone_|[0-9 ._]", "");
+            return name;
+        }
+
+        private static Dictionary<string, List<int>> _aliasNameToGroup;
+        private static Dictionary<int, List<string>> _aliasGroupToNames;
+
+        // 一度だけ構築してキャッシュ（HeuristicBoneMapperの静的コンストラクタと同じ考え方）。
+        private static void EnsureAliasTablesBuilt()
+        {
+            if (_aliasNameToGroup != null) return;
+            _aliasNameToGroup = new Dictionary<string, List<int>>();
+            _aliasGroupToNames = new Dictionary<int, List<string>>();
+
+            for (int i = 0; i < BONE_ALIAS_GROUPS.Length; i++)
+            foreach (var rawName in BONE_ALIAS_GROUPS[i])
+            {
+                var norm = NormalizeAliasName(rawName);
+                if (!_aliasNameToGroup.TryGetValue(norm, out var groups))
+                    _aliasNameToGroup[norm] = groups = new List<int>();
+                if (!groups.Contains(i)) groups.Add(i);
+
+                if (!_aliasGroupToNames.TryGetValue(i, out var names))
+                    _aliasGroupToNames[i] = names = new List<string>();
+                if (!names.Contains(norm)) names.Add(norm);
+            }
+        }
+
+        // destRootの名前が、prefix/suffixに合致していれば剥がした中身の名前を返す。合致しなければnull。
+        private static string StripAffixes(string childName, string prefix, string suffix)
+        {
+            if (!childName.StartsWith(prefix) || !childName.EndsWith(suffix) ||
+                childName.Length == prefix.Length + suffix.Length)
+                return null;
+            return childName.Substring(prefix.Length, childName.Length - prefix.Length - suffix.Length);
+        }
+
+        // MAのGetBonesMapping()と同じ考え方（2パス構成）でボーンを対応付ける（コンポーネント不要版）。
+        // Pass1で名前の完全一致を全て確定させてから、Pass2で残りを別名テーブルでフォールバックする
+        // （先に別名マッチさせると、後で見つかるはずの完全一致の相手を横取りしてしまうため、この順序が重要）。
+        // prefix/suffixは当面デフォルト空文字（完全一致）のみ対応。
+        private static List<(Transform source, Transform dest)> BuildDirectBoneMapping(
+            Transform sourceRoot, Transform destRoot, string prefix = "", string suffix = "")
+        {
+            EnsureAliasTablesBuilt();
+            var result = new List<(Transform, Transform)>();
+            ScanHierarchy(destRoot, sourceRoot);
+            return result;
+
+            void ScanHierarchy(Transform dest, Transform source)
+            {
+                // このレベルのsource子を名前で索引化（既に別のMergeArmatureが乗っているものは除外）。
+                var sourceByName = new Dictionary<string, Transform>();
+                foreach (Transform t in source)
+                {
+                    if (t.GetComponent<ModularAvatarMergeArmature>() != null) continue;
+                    if (!sourceByName.ContainsKey(t.name)) sourceByName[t.name] = t;
+                }
+
+                var levelPairs = new List<(Transform source, Transform dest)>();
+                var fallbackCandidates = new List<Transform>();
+
+                // Pass 1: 完全一致
+                foreach (Transform t in dest)
+                {
+                    if (t.GetComponent<ModularAvatarMergeArmature>() != null) continue;
+
+                    var targetName = StripAffixes(t.gameObject.name, prefix, suffix);
+                    if (targetName != null && sourceByName.TryGetValue(targetName, out var exact))
+                    {
+                        levelPairs.Add((exact, t));
+                        sourceByName.Remove(targetName);
+                    }
+                    else
+                    {
+                        fallbackCandidates.Add(t);
+                    }
+                }
+
+                // Pass 2: 別名テーブルによるフォールバック（Pass1で残ったsource側からのみ選ぶ）
+                var sourceByNormalized = new Dictionary<string, Transform>();
+                foreach (var kv in sourceByName)
+                {
+                    var norm = NormalizeAliasName(kv.Key);
+                    if (!sourceByNormalized.ContainsKey(norm)) sourceByNormalized[norm] = kv.Value;
+                }
+
+                foreach (var t in fallbackCandidates)
+                {
+                    var targetName = StripAffixes(t.gameObject.name, prefix, suffix);
+                    if (targetName == null) continue;
+                    if (!_aliasNameToGroup.TryGetValue(NormalizeAliasName(targetName), out var groups)) continue;
+
+                    Transform found = null;
+                    foreach (var g in groups)
+                    {
+                        foreach (var alias in _aliasGroupToNames[g])
+                        {
+                            if (sourceByNormalized.TryGetValue(alias, out found)) break;
+                        }
+                        if (found != null) break;
+                    }
+                    if (found == null) continue;
+
+                    levelPairs.Add((found, t));
+                    sourceByName.Remove(found.name);
+                    sourceByNormalized.Remove(NormalizeAliasName(found.name));
+                }
+
+                foreach (var (s, d) in levelPairs)
+                {
+                    result.Add((s, d));
+                    ScanHierarchy(d, s);
+                }
+            }
+        }
+
+        // MAの「ScaleAdjusterを一致させる」相当（MergeArmature不要版）。ルートペア＋対応付けの各ペアで合わせる。
+        private static void MatchAvatarScaleAdjustersDirect(Transform sourceRoot, Transform destRoot)
+        {
+            MatchOneScaleAdjuster(sourceRoot, destRoot);
+            foreach (var (source, dest) in BuildDirectBoneMapping(sourceRoot, destRoot))
+                MatchOneScaleAdjuster(source, dest);
+        }
+
+        // MAのMatchScaleAdjusterローカル関数と同じ処理。ScaleAdjusterの値をコピー/追加/削除するだけで、
+        // 子オブジェクトの位置補正は行わない（ApplyScaleAdjusterScaleとは違い、あえて再利用しない。
+        // ScaleAdjusterの実効果はNDMFのビルド時にSkinnedMeshRendererのボーン参照を差し替える方式のため、
+        // 子の位置は元々関係無く、MA本体もこの一括同期処理では子位置に触れていない）。
+        private static void MatchOneScaleAdjuster(Transform sourceBone, Transform destBone)
+        {
+            var sourceAdj = sourceBone.GetComponent<ModularAvatarScaleAdjuster>();
+            var destAdj = destBone.GetComponent<ModularAvatarScaleAdjuster>();
+
+            if (sourceAdj == null)
+            {
+                if (destAdj != null)
+                {
+                    Undo.DestroyObjectImmediate(destAdj);
+                    EditorUtility.SetDirty(destBone.gameObject);
+                    PrefabUtility.RecordPrefabInstancePropertyModifications(destBone.gameObject);
+                }
+                return;
+            }
+
+            if (destAdj == null)
+                destAdj = Undo.AddComponent<ModularAvatarScaleAdjuster>(destBone.gameObject);
+            else
+                Undo.RecordObject(destAdj, "Match Avatar ScaleAdjuster");
+
+            destAdj.Scale = sourceAdj.Scale;
+            EditorUtility.SetDirty(destAdj);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(destAdj);
+        }
+
+        // MAの「位置をもとアバターに合わせてリセット」相当（MergeArmature不要版、AT-pose変換・
+        // ルートスケール調整は含まない）。位置は常にコピーし、スケール・回転は引数で指定した場合のみコピーする。
+        private static void CopyAvatarBoneTransformsDirect(Transform sourceRoot, Transform destRoot, bool adjustScale, bool adjustRotation)
+        {
+            CopyOneBoneTransform(sourceRoot, destRoot, adjustScale, adjustRotation);
+            foreach (var (source, dest) in BuildDirectBoneMapping(sourceRoot, destRoot))
+                CopyOneBoneTransform(source, dest, adjustScale, adjustRotation);
+        }
+
+        private static void CopyOneBoneTransform(Transform source, Transform dest, bool adjustScale, bool adjustRotation)
+        {
+            Undo.RecordObject(dest, "Copy Avatar Bone Transform");
+            dest.position = source.position;
+            if (adjustScale) dest.localScale = source.localScale;
+            if (adjustRotation) dest.localRotation = source.localRotation;
+            EditorUtility.SetDirty(dest);
+        }
+
+        // アバタールート自身（VRCAvatarDescriptorが付いたGameObject）のlocalScaleをコピーする。
+        // ボーンのScaleAdjuster/Transformとは別に、アバター全体の大きさ（ルートスケール）の差を揃えるため。
+        private static void CopyAvatarRootScale(GameObject sourceAvatarRoot, GameObject destAvatarRoot)
+        {
+            if (sourceAvatarRoot == null || destAvatarRoot == null) return;
+            Undo.RecordObject(destAvatarRoot.transform, "Copy Avatar Root Scale");
+            destAvatarRoot.transform.localScale = sourceAvatarRoot.transform.localScale;
+            EditorUtility.SetDirty(destAvatarRoot.transform);
+        }
+
+        // 対象自身がVRCAvatarDescriptorを持つか＝「衣装」ではなく「アバター」として扱うかの判定。
+        private static bool IsAvatarTarget(GameObject target) =>
+            target != null && target.GetComponent<VRCAvatarDescriptor>() != null;
+
+        // armatureが属するアバタールート（VRCAvatarDescriptorを持つGameObject）を親方向に辿って求める。
+        private static GameObject GetOwningAvatarRoot(Transform armature)
+        {
+            var current = armature;
+            while (current != null)
+            {
+                var descriptor = current.GetComponent<VRCAvatarDescriptor>();
+                if (descriptor != null) return descriptor.gameObject;
+                current = current.parent;
+            }
+            return null;
+        }
+
+        // targetが素体アバター自身（_avatarArmatureの所属アバター）かどうか。
+        // スキャン・一括同期の対象から除外するために使う（自分自身へのコピーを避ける）。
+        private bool IsSourceAvatarSelf(GameObject target)
+        {
+            if (target == null || _avatarArmature == null) return false;
+            return target == GetOwningAvatarRoot(_avatarArmature);
+        }
+
         private static bool ApplyScaleAdjusterScale(
             ModularAvatarScaleAdjuster adjuster,
             Vector3 targetScale,
@@ -773,16 +1225,32 @@ namespace qsyi
 
             try
             {
-                foreach (var outfit in _targets.Where(t => t != null))
-                foreach (var armature in ResolveOutfitArmatures(outfit))
+                foreach (var target in _targets.Where(t => t != null && !IsSourceAvatarSelf(t)))
+                foreach (var armature in ResolveOutfitArmatures(target))
                 {
                     if (armature == null) continue;
 
-                    if (_autoSyncScaleAdjuster)
-                        MatchOutfitScaleAdjusters(armature);
+                    if (IsAvatarTarget(target))
+                    {
+                        if (_avatarArmature == null) continue;
 
-                    if (_autoSyncScale || _autoSyncRotate)
-                        ForceOutfitPositionToAvatar(armature, _autoSyncScale, _autoSyncRotate);
+                        if (_autoSyncScaleAdjuster)
+                            MatchAvatarScaleAdjustersDirect(_avatarArmature, armature);
+
+                        if (_autoSyncScale)
+                            CopyAvatarRootScale(GetOwningAvatarRoot(_avatarArmature), target);
+
+                        if (_autoSyncScale || _autoSyncRotate)
+                            CopyAvatarBoneTransformsDirect(_avatarArmature, armature, _autoSyncScale, _autoSyncRotate);
+                    }
+                    else
+                    {
+                        if (_autoSyncScaleAdjuster)
+                            MatchOutfitScaleAdjusters(armature);
+
+                        if (_autoSyncScale || _autoSyncRotate)
+                            ForceOutfitPositionToAvatar(armature, _autoSyncScale, _autoSyncRotate);
+                    }
                 }
             }
             catch (System.Exception e)
@@ -806,14 +1274,16 @@ namespace qsyi
             if (_avatarArmature != null)
                 BuildBoneMap(_avatarArmature, _avatarBones);
 
-            foreach (var outfit in _targets.Where(t => t != null))
+            foreach (var outfit in _targets.Where(t => t != null && !IsSourceAvatarSelf(t)))
             {
                 var entry = GetOrCreateOutfitArmatureEntry(outfit);
                 TryAutoAssignOutfitArmatureOnce(entry, outfit);
                 var armatures = ResolveOutfitArmatures(outfit);
                 if (armatures.Count > 0)
                 {
-                    var boneMap = BuildOutfitBoneMapFromMergeArmature(armatures);
+                    var boneMap = IsAvatarTarget(outfit) && _avatarArmature != null
+                        ? BuildOutfitBoneMapFromDirectMapping(armatures)
+                        : BuildOutfitBoneMapFromMergeArmature(armatures);
                     if (boneMap.Count > 0)
                         _outfitBones[outfit] = boneMap;
                 }
@@ -853,6 +1323,35 @@ namespace qsyi
                         if (avatarBone != null && outfitBone != null && !avatarToOutfit.ContainsKey(avatarBone))
                             avatarToOutfit[avatarBone] = outfitBone;
                     }
+                }
+            }
+
+            var boneMap = new Dictionary<string, Transform>();
+            foreach (var boneName in BONE_ORDER)
+            {
+                if (_avatarBones.TryGetValue(boneName, out var avatarBone) &&
+                    avatarBone != null &&
+                    avatarToOutfit.TryGetValue(avatarBone, out var outfitBone))
+                {
+                    boneMap[boneName] = outfitBone;
+                }
+            }
+            return boneMap;
+        }
+
+        // アバターターゲット用：MergeArmatureの代わりにBuildDirectBoneMapping（名前完全一致→別名テーブル）で対応付ける。
+        // 構造はBuildOutfitBoneMapFromMergeArmatureと同じで、ペア収集元だけが異なる。
+        private Dictionary<string, Transform> BuildOutfitBoneMapFromDirectMapping(List<Transform> armatures)
+        {
+            var avatarToOutfit = new Dictionary<Transform, Transform>();
+            foreach (var armature in armatures)
+            {
+                if (armature == null) continue;
+
+                foreach (var (avatarBone, outfitBone) in BuildDirectBoneMapping(_avatarArmature, armature))
+                {
+                    if (avatarBone != null && outfitBone != null && !avatarToOutfit.ContainsKey(avatarBone))
+                        avatarToOutfit[avatarBone] = outfitBone;
                 }
             }
 
@@ -937,8 +1436,12 @@ namespace qsyi
             }
         }
 
+        // _targets内に複数の異なるアバターの候補がある場合、Hierarchyパネルで一番上に表示される
+        // （＝ヒエラルキー順が最も早い）ものを素体として優先する。
         private Transform FindAvatarArmature()
         {
+            VRCAvatarDescriptor best = null;
+
             foreach (var target in _targets.Where(t => t != null))
             {
                 var current = target.transform;
@@ -946,11 +1449,42 @@ namespace qsyi
                 {
                     var descriptor = current.GetComponent<VRCAvatarDescriptor>();
                     if (descriptor != null)
-                        return FindChildByKeyword(descriptor.transform, "armature");
+                    {
+                        if (best == null || CompareHierarchyOrder(descriptor.transform, best.transform) < 0)
+                            best = descriptor;
+                        break;
+                    }
                     current = current.parent;
                 }
             }
-            return null;
+
+            return best != null ? FindChildByKeyword(best.transform, "armature") : null;
+        }
+
+        // シーンルートからのSiblingIndexの並びを求める（Hierarchyパネルでの表示順を再現するため）。
+        private static int[] GetHierarchyPath(Transform t)
+        {
+            var path = new List<int>();
+            while (t != null)
+            {
+                path.Add(t.GetSiblingIndex());
+                t = t.parent;
+            }
+            path.Reverse();
+            return path.ToArray();
+        }
+
+        // Hierarchyパネルでの表示順を比較する（aがbより上なら負の値）。
+        private static int CompareHierarchyOrder(Transform a, Transform b)
+        {
+            var pa = GetHierarchyPath(a);
+            var pb = GetHierarchyPath(b);
+            int len = Mathf.Min(pa.Length, pb.Length);
+            for (int i = 0; i < len; i++)
+            {
+                if (pa[i] != pb[i]) return pa[i] - pb[i];
+            }
+            return pa.Length - pb.Length;
         }
 
         private Transform FindChildByKeyword(Transform parent, string keyword)

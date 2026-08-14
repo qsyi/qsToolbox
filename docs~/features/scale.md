@@ -5,10 +5,6 @@
 
 [Modular Avatar](https://modular-avatar.nadena.dev/ja) の [**Scale Adjuster**](https://modular-avatar.nadena.dev/ja/docs/reference/scale-adjuster) にも対応しています。
 
-::: tip
-[Merge Armature](https://modular-avatar.nadena.dev/ja/docs/reference/merge-armature) と [Copy Scale Adjuster](https://github.com/Rerigferl/modular-avatar-copy-scale-adjuster) を組み合わせたやり方に慣れている方であれば、無理にこちらへ乗り換える必要はありません。
-:::
-
 ---
 
 ## こんな時に
@@ -36,3 +32,7 @@
 - **ボーン一覧** — 緑の点は素体側でそのボーンが見つかったこと、オレンジの点は衣装との間にスケール差分があることを表します。差分のあるボーンにマウスを乗せると、どのくらいズレているかがツールチップで見られます
 - **スケール編集** — 一覧でボーンを選ぶと、右側にそのボーンの Scale（および Scale Adjuster があればその値）が表示され、直接数値を編集できます
 - **ScaleAdjusterを同期 / スケールを同期 / 回転も同期**（デフォルト全てON） — 「一括同期」を押した時に何を合わせるかを選べます。いずれもModular AvatarのMerge Armatureが持つ公式の処理をそのまま呼び出しています。**スケール** または **回転** を同期すると、衣装ボーンの位置も基準アバターに合わせてリセットされます
+
+::: tip 衣装欄にはアバターも指定できます
+別のアバターを「衣装」欄に入れると、アバター同士でもスケール・ScaleAdjusterをコピーできます。複数のアバターが混ざっている場合は、Hierarchyパネルで一番上にあるものが素体として優先されます。
+:::

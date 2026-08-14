@@ -63,3 +63,27 @@
   background-color: var(--qs-c-pink-1) !important;
   border-color: var(--qs-c-pink-1) !important;
 }
+
+/* ホームの先頭3枚（マテリアル差し替え・EditorOnly・スケールコピー）を大きく特別扱い */
+/* 1〜2枚目: 上段に2枚並び / 3枚目: 中段左寄せ、右の隙間には次の小カードが自然に入る */
+.VPFeatures .items .item:nth-child(-n+2) {
+  width: 50% !important;
+}
+.VPFeatures .items .item:nth-child(3) {
+  width: 50% !important;
+}
+@media (max-width: 767px) {
+  .VPFeatures .items .item:nth-child(-n+3) {
+    width: 100% !important;
+  }
+}
+.VPFeatures .items .item:nth-child(-n+3) .box {
+  padding: 32px 32px 28px;
+}
+.VPFeatures .items .item:nth-child(-n+3) .title {
+  font-size: 22px;
+  line-height: 1.4;
+}
+.VPFeatures .items .item:nth-child(-n+3) .details {
+  font-size: 15px;
+}

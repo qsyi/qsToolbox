@@ -14,6 +14,18 @@ hero:
       link: /features/contextmenu
 
 features:
+  - title: メッシュにまたがっているマテリアルをまとめて差し替えたい！
+    details: 衣装や髪を選ぶだけでマテリアルが一覧表示され、ドラッグ＆ドロップで差し替えられます。
+    link: /features/material
+    linkText: 使い方を見る
+  - title: 作業中、オブジェクトをサクッと隠したりEditorOnly にしたい
+    details: 選択した状態で Ctrl + E を押すだけで、表示・非表示と EditorOnly をまとめて切り替えられます。
+    link: /features/editoronly
+    linkText: 使い方を見る
+  - title: アバター間、または衣装にスケールをコピーしたい
+    details: 衣装なら素体に合わせて一括同期、別のアバターならアバター同士でスケール・ScaleAdjusterをコピーできます。
+    link: /features/scale
+    linkText: 使い方を見る
   - title: 複数マテリアルに一括で影やリムライトを設定したい！
     details: コピー元のマテリアルを選ぶだけで、影・リムライト・逆光ライトなどを他のマテリアルへ一括同期できます。
     link: /features/shadowsync
@@ -25,18 +37,6 @@ features:
   - title: フォルダ移動のたびに何度もクリックして戻っている
     details: よく使うフォルダをブックマークしておくと、ボタン一つで素早く移動できます。
     link: /features/bookmark
-    linkText: 使い方を見る
-  - title: 作業中、オブジェクトをサクッと隠したり EditorOnly にしたい
-    details: 選択した状態で Ctrl + E を押すだけで、表示・非表示と EditorOnly をまとめて切り替えられます。
-    link: /features/editoronly
-    linkText: 使い方を見る
-  - title: 色違いマテリアル、切り替えるのが毎回面倒！
-    details: 衣装や髪を選ぶだけでマテリアルが一覧表示され、ドラッグ＆ドロップで差し替えられます。
-    link: /features/material
-    linkText: 使い方を見る
-  - title: 衣装のスケール、素体に合わせて一括で直したい
-    details: 衣装を選ぶと、素体のスケールに一発で同期できます。Scale Adjuster にも対応！
-    link: /features/scale
     linkText: 使い方を見る
   - title: 顔改変後、まばたきが干渉してしまっている
     details: 改変した目元とまばたきのシェイプキーを選んでワンクリックするだけで、瞼の突き抜けを自動で直せます。

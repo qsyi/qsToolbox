@@ -15,9 +15,9 @@ MonoBehaviour:
   category: qsToolbox
   props:
   - key: _DistanceFadeColor
-    r: 0.23584884
-    g: 0.23584884
-    b: 0.23584884
+    r: 0
+    g: 0
+    b: 0
     a: 1
     value: 0
   - key: _DistanceFadeRimColor

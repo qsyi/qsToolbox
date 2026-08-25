@@ -2,6 +2,9 @@ name: "Build unitypackage"
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [package.json]
 
 permissions:
   contents: write

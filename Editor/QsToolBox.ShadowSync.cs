@@ -13,6 +13,18 @@ namespace qsyi
     internal partial class QsToolBox
     {
         private VisualElement _shadowSyncPane;
+
+        // ─── liltoon / poiyomi の2サブモードの切り替え ─────────────────
+        private enum ShadowSyncSubMode { Liltoon, Poiyomi }
+        private ShadowSyncSubMode _shadowSyncSubMode = ShadowSyncSubMode.Liltoon;
+        private VisualElement _shadowSyncLiltoonModeBtn;
+        private VisualElement _shadowSyncPoiyomiModeBtn;
+        private VisualElement _shadowSyncLiltoonModeAccent;
+        private VisualElement _shadowSyncPoiyomiModeAccent;
+        private Label _shadowSyncLiltoonModeLabel;
+        private Label _shadowSyncPoiyomiModeLabel;
+        private VisualElement _shadowSyncSubPaneSlot;
+
         private Material      _shadowSyncSource;
         private ObjectField   _shadowSyncSourceField;
         private Renderer      _shadowSyncSourceRenderer;
@@ -438,7 +450,93 @@ namespace qsyi
         private static Color ShadowSyncRow1Bg =>
             EditorGUIUtility.isProSkin ? new Color(0.19f, 0.19f, 0.19f) : new Color(0.86f, 0.86f, 0.86f);
 
+        // ─── モードの外枠（サブタブ + 中身のスロット） ────────────────
+
         private VisualElement BuildShadowSyncPane()
+        {
+            var pane = new VisualElement();
+            pane.style.flexDirection = FlexDirection.Column;
+            pane.style.flexGrow      = 1;
+            pane.style.minHeight     = 0;
+
+            var modeRow = new VisualElement();
+            modeRow.style.flexDirection     = FlexDirection.Row;
+            modeRow.style.flexShrink        = 0;
+            modeRow.style.borderBottomWidth = 1;
+            modeRow.style.borderBottomColor = PaneBorderColor;
+
+            _shadowSyncLiltoonModeBtn = BuildFlatSubTab("liltoon", () => SetShadowSyncSubMode(ShadowSyncSubMode.Liltoon),
+                out _shadowSyncLiltoonModeAccent, out _shadowSyncLiltoonModeLabel);
+            modeRow.Add(_shadowSyncLiltoonModeBtn);
+
+            _shadowSyncPoiyomiModeBtn = BuildFlatSubTab("poiyomi", () => SetShadowSyncSubMode(ShadowSyncSubMode.Poiyomi),
+                out _shadowSyncPoiyomiModeAccent, out _shadowSyncPoiyomiModeLabel);
+            modeRow.Add(_shadowSyncPoiyomiModeBtn);
+
+            pane.Add(modeRow);
+
+            _shadowSyncSubPaneSlot = new VisualElement();
+            _shadowSyncSubPaneSlot.style.flexGrow  = 1;
+            _shadowSyncSubPaneSlot.style.minHeight = 0;
+            pane.Add(_shadowSyncSubPaneSlot);
+
+            RebuildShadowSyncSubMode();
+            return pane;
+        }
+
+        private void SetShadowSyncSubMode(ShadowSyncSubMode mode)
+        {
+            if (_shadowSyncSubMode == mode) return;
+            _shadowSyncSubMode = mode;
+            RebuildShadowSyncSubMode();
+        }
+
+        // 外部（ScanDataからの再スキャン等）から呼ばれる窓口。静的なUI構造は壊さず、現在アクティブなサブモードの中身だけを更新する。
+        private void RebuildShadowSyncPane()
+        {
+            if (_shadowSyncSubPaneSlot == null) return;
+            if (_shadowSyncSubMode == ShadowSyncSubMode.Liltoon)
+                RebuildShadowSyncDestList();
+            else
+                RebuildPoiyomiShadowSyncDestList();
+        }
+
+        private void RebuildShadowSyncSubMode()
+        {
+            if (_shadowSyncSubPaneSlot == null) return;
+
+            bool liltoonActive = _shadowSyncSubMode == ShadowSyncSubMode.Liltoon;
+            SetFlatSubTabActive(_shadowSyncLiltoonModeAccent, _shadowSyncLiltoonModeLabel, liltoonActive);
+            SetFlatSubTabActive(_shadowSyncPoiyomiModeAccent, _shadowSyncPoiyomiModeLabel, !liltoonActive);
+
+            _shadowSyncSubPaneSlot.Clear();
+            if (liltoonActive)
+            {
+                _shadowSyncSubPaneSlot.Add(BuildLiltoonShadowSyncSubPane());
+            }
+            else
+            {
+                _poiShadowSyncListEl      = null;
+                _poiShadowSyncCountLabel  = null;
+                _poiShadowSyncAllSelBtn   = null;
+                _poiShadowSyncSyncBtn     = null;
+                _poiShadowSyncSourceField = null;
+                _poiShadowSyncSlotButton  = null;
+                _poiShadowPresetListEl    = null;
+                _poiShadowSyncCreatePresetBtn = null;
+                _poiShadowSyncMasterToggle = null;
+                _poiShadowShadowToggle    = null;
+                _poiShadowColorToggle     = null;
+                _poiShadowNumToggle       = null;
+                _poiShadowSwatchUpdaters.Clear();
+                _poiShadowCategoryToggles.Clear();
+                _shadowSyncSubPaneSlot.Add(BuildPoiyomiShadowSyncSubPane());
+            }
+        }
+
+        // ─── liltoonサブモード（既存機能、外枠再編に伴うリネームのみ・処理内容は無変更） ─
+
+        private VisualElement BuildLiltoonShadowSyncSubPane()
         {
             _shadowSyncParams.Clear();
             _shadowSyncColorBoxes.Clear();
@@ -835,53 +933,6 @@ namespace qsyi
             hsArea.style.borderTopWidth = 1;
             hsArea.style.borderTopColor = PaneBorderColor;
             {
-                VisualElement MakeSliderRow(string labelText, float min, float max,
-                    float initial, float resetVal,
-                    System.Func<float, string> fmt, System.Action<float> onChange)
-                {
-                    var row = new VisualElement();
-                    row.style.flexDirection = FlexDirection.Row;
-                    row.style.alignItems    = Align.Center;
-                    row.style.marginBottom  = 2;
-                    row.style.minWidth      = 0;
-
-                    var lbl = new Label(labelText);
-                    lbl.style.fontSize   = 10;
-                    lbl.style.width      = 26;
-                    lbl.style.flexShrink = 0;
-                    row.Add(lbl);
-
-                    var slider = new Slider(min, max) { value = initial };
-                    slider.style.flexGrow    = 1;
-                    slider.style.flexShrink  = 1;
-                    slider.style.minWidth    = 0;
-                    slider.style.marginLeft  = 2;
-                    slider.style.marginRight = 2;
-                    slider.Q<Label>()?.RemoveFromHierarchy();
-                    row.Add(slider);
-
-                    var valLbl = new Label(fmt(initial));
-                    valLbl.style.fontSize       = 10;
-                    valLbl.style.width          = 32;
-                    valLbl.style.flexShrink     = 0;
-                    valLbl.style.unityTextAlign = TextAnchor.MiddleRight;
-                    row.Add(valLbl);
-
-                    float snapRange = (max - min) * 0.03f;
-                    slider.RegisterValueChangedCallback(evt =>
-                    {
-                        float v = evt.newValue;
-                        if (v != resetVal && Mathf.Abs(v - resetVal) < snapRange)
-                        {
-                            v = resetVal;
-                            slider.SetValueWithoutNotify(v);
-                        }
-                        valLbl.text = fmt(v);
-                        onChange(v);
-                    });
-                    return row;
-                }
-
                 hsArea.Add(MakeSliderRow("色相", -180f, 180f, _shadowHueShift, 0f,
                     v => $"{v:+0;-0;+0}°",
                     v => { _shadowHueShift = v; RefreshShadowSyncSwatches(); }));
@@ -1371,6 +1422,54 @@ namespace qsyi
             }
         }
 
+        // 色相/彩度シフト用スライダー行。liltoon/poiyomi両サブモードの色相彩度エリアで共有。
+        private static VisualElement MakeSliderRow(string labelText, float min, float max,
+            float initial, float resetVal,
+            System.Func<float, string> fmt, System.Action<float> onChange)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems    = Align.Center;
+            row.style.marginBottom  = 2;
+            row.style.minWidth      = 0;
+
+            var lbl = new Label(labelText);
+            lbl.style.fontSize   = 10;
+            lbl.style.width      = 26;
+            lbl.style.flexShrink = 0;
+            row.Add(lbl);
+
+            var slider = new Slider(min, max) { value = initial };
+            slider.style.flexGrow    = 1;
+            slider.style.flexShrink  = 1;
+            slider.style.minWidth    = 0;
+            slider.style.marginLeft  = 2;
+            slider.style.marginRight = 2;
+            slider.Q<Label>()?.RemoveFromHierarchy();
+            row.Add(slider);
+
+            var valLbl = new Label(fmt(initial));
+            valLbl.style.fontSize       = 10;
+            valLbl.style.width          = 32;
+            valLbl.style.flexShrink     = 0;
+            valLbl.style.unityTextAlign = TextAnchor.MiddleRight;
+            row.Add(valLbl);
+
+            float snapRange = (max - min) * 0.03f;
+            slider.RegisterValueChangedCallback(evt =>
+            {
+                float v = evt.newValue;
+                if (v != resetVal && Mathf.Abs(v - resetVal) < snapRange)
+                {
+                    v = resetVal;
+                    slider.SetValueWithoutNotify(v);
+                }
+                valLbl.text = fmt(v);
+                onChange(v);
+            });
+            return row;
+        }
+
         private static Color AdjustColor(Color c, float hueShift, float satScale)
         {
             if (hueShift == 0f && satScale == 1f) return c;
@@ -1550,6 +1649,7 @@ namespace qsyi
             foreach (var guid in AssetDatabase.FindAssets("t:ShadowSyncPresetAsset"))
             {
                 var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.StartsWith(POI_SHADOW_PRESET_ASSET_FOLDER + "/")) continue; // poiyomi専用プリセットはliltoon側の棚に出さない
                 var so   = AssetDatabase.LoadAssetAtPath<ShadowSyncPresetAsset>(path);
                 if (so == null) continue;
                 _builtinPresets.Add(new ShadowSyncPresetEntry
@@ -2050,6 +2150,8 @@ namespace qsyi
                 else
                     CopyShadowSyncToMaterial(dest);
                 EditorUtility.SetDirty(dest);
+                // KeywordEnum/ThryToggle系プロパティはSetFloatだけではシェーダーキーワードが追従しないため明示的に再同期する
+                MaterialEditor.ApplyMaterialPropertyDrawers(dest);
             }
 
             Undo.CollapseUndoOperations(undoGroup);

@@ -283,7 +283,7 @@ namespace qsyi
                     if (ScanBones()) RebuildScalePane();
                     break;
                 case Mode.ShadowSync:
-                    if (ScanMaterials()) RebuildShadowSyncDestList();
+                    if (ScanMaterials()) RebuildShadowSyncPane();
                     break;
                 case Mode.MenuGenerator:
                     if (ScanMenuMeshEntries()) RebuildMenuPane();
@@ -512,6 +512,62 @@ namespace qsyi
             }
 
             if (repaint) Repaint();
+        }
+
+        // フラットなタブ風トグル項目（各ペイン内のサブモード切替で使う。上部モードタブと同じ見た目：
+        // 下線アクセント・ホバー時の背景ハイライト・アクティブ時は文字が青太字になる）
+        private static VisualElement BuildFlatSubTab(string label, Action onClick, out VisualElement accent, out Label textLabel)
+        {
+            var tab = new VisualElement();
+            tab.style.flexGrow       = 1;
+            tab.style.flexDirection  = FlexDirection.Row;
+            tab.style.alignItems     = Align.Center;
+            tab.style.justifyContent = Justify.Center;
+            tab.style.paddingTop     = 6;
+            tab.style.paddingBottom  = 6;
+            tab.style.position       = Position.Relative;
+
+            textLabel = new Label(label);
+            textLabel.style.fontSize = 11;
+            tab.Add(textLabel);
+
+            var acc = new VisualElement();
+            acc.style.position        = Position.Absolute;
+            acc.style.bottom          = 0;
+            acc.style.left            = 0;
+            acc.style.right           = 0;
+            acc.style.height          = 2;
+            acc.style.backgroundColor = AccentColor;
+            acc.style.display         = DisplayStyle.None;
+            tab.Add(acc);
+            accent = acc;
+
+            tab.RegisterCallback<MouseEnterEvent>(_ =>
+                tab.style.backgroundColor = EditorGUIUtility.isProSkin
+                    ? new Color(0.26f, 0.26f, 0.28f, 1f)
+                    : new Color(0.78f, 0.78f, 0.80f, 1f));
+            tab.RegisterCallback<MouseLeaveEvent>(_ =>
+                tab.style.backgroundColor = new StyleColor(StyleKeyword.Null));
+            tab.RegisterCallback<MouseDownEvent>(_ => onClick());
+
+            return tab;
+        }
+
+        private static void SetFlatSubTabActive(VisualElement accent, Label textLabel, bool active)
+        {
+            bool dark = EditorGUIUtility.isProSkin;
+            Color activeText   = new Color(0.40f, 0.72f, 1.00f, 1f);
+            Color inactiveText = dark
+                ? new Color(0.65f, 0.65f, 0.65f, 1f)
+                : new Color(0.35f, 0.35f, 0.35f, 1f);
+            Color c = active ? activeText : inactiveText;
+
+            if (accent != null) accent.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            if (textLabel != null)
+            {
+                textLabel.style.color = c;
+                textLabel.style.unityFontStyleAndWeight = active ? FontStyle.Bold : FontStyle.Normal;
+            }
         }
 
         private void UpdateVersionLabel()

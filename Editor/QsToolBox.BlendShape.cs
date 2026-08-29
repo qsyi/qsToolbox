@@ -20,8 +20,12 @@ namespace qsyi
         // ─── シェイプキー元タブの2モード ───────────────────────────────
         private enum ShapeKeySubMode { Compose, BlinkCorrection }
         private ShapeKeySubMode _shapeKeySubMode = ShapeKeySubMode.Compose;
-        private Button _shapeKeyComposeModeBtn;
-        private Button _shapeKeyBlinkModeBtn;
+        private VisualElement _shapeKeyComposeModeBtn;
+        private VisualElement _shapeKeyBlinkModeBtn;
+        private VisualElement _shapeKeyComposeModeAccent;
+        private VisualElement _shapeKeyBlinkModeAccent;
+        private Label _shapeKeyComposeModeLabel;
+        private Label _shapeKeyBlinkModeLabel;
         private VisualElement _shapeKeySubPaneSlot;
 
         // ─── まばたき修正モード ─────────────────────────────────────
@@ -134,26 +138,19 @@ namespace qsyi
             pane.style.flexDirection = FlexDirection.Column;
             pane.style.flexGrow = 1;
 
-            // ── シェイプキー元 / まばたき修正 の切り替え ──
+            // ── シェイプキー元 / まばたき修正 の切り替え（上部モードタブと同じ見た目のフラットタブ） ──
             var modeRow = new VisualElement();
             modeRow.style.flexDirection     = FlexDirection.Row;
             modeRow.style.flexShrink        = 0;
-            modeRow.style.paddingLeft       = modeRow.style.paddingRight  = 8;
-            modeRow.style.paddingTop        = modeRow.style.paddingBottom = 4;
             modeRow.style.borderBottomWidth = 1;
             modeRow.style.borderBottomColor = PaneBorderColor;
 
-            _shapeKeyComposeModeBtn = new Button(() => SetShapeKeySubMode(ShapeKeySubMode.Compose)) { text = "シェイプキー合成" };
-            _shapeKeyComposeModeBtn.style.flexGrow = 1;
-            _shapeKeyComposeModeBtn.style.height   = 22;
-            _shapeKeyComposeModeBtn.style.fontSize = 11;
-            _shapeKeyComposeModeBtn.style.marginRight = 3;
+            _shapeKeyComposeModeBtn = BuildFlatSubTab("シェイプキー合成", () => SetShapeKeySubMode(ShapeKeySubMode.Compose),
+                out _shapeKeyComposeModeAccent, out _shapeKeyComposeModeLabel);
             modeRow.Add(_shapeKeyComposeModeBtn);
 
-            _shapeKeyBlinkModeBtn = new Button(() => SetShapeKeySubMode(ShapeKeySubMode.BlinkCorrection)) { text = "まばたき修正" };
-            _shapeKeyBlinkModeBtn.style.flexGrow = 1;
-            _shapeKeyBlinkModeBtn.style.height   = 22;
-            _shapeKeyBlinkModeBtn.style.fontSize = 11;
+            _shapeKeyBlinkModeBtn = BuildFlatSubTab("まばたき修正", () => SetShapeKeySubMode(ShapeKeySubMode.BlinkCorrection),
+                out _shapeKeyBlinkModeAccent, out _shapeKeyBlinkModeLabel);
             modeRow.Add(_shapeKeyBlinkModeBtn);
 
             pane.Add(modeRow);
@@ -223,8 +220,8 @@ namespace qsyi
             if (_shapeKeySubPaneSlot == null) return;
 
             bool composeActive = _shapeKeySubMode == ShapeKeySubMode.Compose;
-            SetAccentHighlight(_shapeKeyComposeModeBtn, composeActive);
-            SetAccentHighlight(_shapeKeyBlinkModeBtn, !composeActive);
+            SetFlatSubTabActive(_shapeKeyComposeModeAccent, _shapeKeyComposeModeLabel, composeActive);
+            SetFlatSubTabActive(_shapeKeyBlinkModeAccent, _shapeKeyBlinkModeLabel, !composeActive);
 
             _shapeKeySubPaneSlot.Clear();
             if (composeActive)
@@ -262,16 +259,6 @@ namespace qsyi
         private static readonly Color ConfirmTextColor = new Color(0.25f, 0.75f, 0.30f);
         // 自動検出された候補のハイライト色（実行ボタンの警告文と同じ暖色系を流用し、色数を増やさない）
         private static readonly Color CandidateHighlightColor = new Color(0.85f, 0.60f, 0.15f);
-
-        // アクセントカラーでのON/OFFハイライト（モード切替ボタン、L/R/両ボタンなど）
-        private static void SetAccentHighlight(VisualElement el, bool active)
-        {
-            if (el == null) return;
-            el.style.backgroundColor = active
-                ? new StyleColor(new Color(AccentColor.r, AccentColor.g, AccentColor.b, 0.30f))
-                : new StyleColor(StyleKeyword.Null);
-            el.style.unityFontStyleAndWeight = active ? FontStyle.Bold : FontStyle.Normal;
-        }
 
         // 緑の「確定済み」ハイライト（ベース選択、使用中、対象など）
         private static void SetConfirmHighlight(VisualElement el, bool active)

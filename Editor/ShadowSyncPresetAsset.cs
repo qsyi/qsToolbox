@@ -10,6 +10,8 @@ namespace qsyi
         public string key;
         public float r, g, b, a;
         public float value;
+        // テクスチャ項目用（poiyomiのSkin LUT）。タイリングはr,g、オフセットはb,aに入れる
+        public Texture texture;
     }
 
     // 自作プリセットの保存形式（lilToonPresetと同じ1プリセット=1アセット方式）。表示名はファイル名（Object.name）が正。

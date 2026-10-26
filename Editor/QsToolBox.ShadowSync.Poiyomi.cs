@@ -11,7 +11,7 @@ namespace qsyi
 {
     internal partial class QsToolBox
     {
-        private enum PoiyomiShadowParamGroup { LightData, RimLight, RimShade, Backlight }
+        private enum PoiyomiShadowParamGroup { LightData, RimLight, RimShade, Backlight, Outline }
 
         // Light Data セクションの一般プロパティ。_LightingMode に関係なく常に同期対象（テクスチャ・デバッグ表示を除く）。
         private static readonly ShadowParam[] POIYOMI_LIGHTDATA_PARAMS = {
@@ -79,10 +79,23 @@ namespace qsyi
                 new ShadowParam("_ShadowStrength",     "影強度",          ShadowParamType.Float, ShadowParamGroup.ShadowSettings),
                 new ShadowParam("_LightingIgnoreAmbientColor","間接光の影色を無視", ShadowParamType.Float, ShadowParamGroup.ShadowSettings),
             },
-            // 他の8方式（Wrapped/Skin/ShadeMap/Flat/Realistic/Cloth/SDF/TextureRamp）は対応しない。
+            // _LightingMode == 3: Skin（LUTテクスチャ _SkinLUT は CopyPoiyomiShadowSyncToMaterial で参照コピーする。厚みマップはメッシュ固有UVのため対象外）
+            [3] = new[] {
+                new ShadowParam("_LightingShadowColor", "影のティント",       ShadowParamType.Color,  ShadowParamGroup.ShadowSettings),
+                new ShadowParam("_SssScale",            "SSS強度",            ShadowParamType.Float,  ShadowParamGroup.ShadowSettings),
+                new ShadowParam("_SkinThicknessPower",  "厚みパワー",          ShadowParamType.Float,  ShadowParamGroup.ShadowSettings),
+                new ShadowParam("_SssBumpBlur",         "バンプぼかし",        ShadowParamType.Float,  ShadowParamGroup.ShadowSettings),
+                new ShadowParam("_SssTransmissionAbsorption", "透過吸収",      ShadowParamType.Vector, ShadowParamGroup.ShadowSettings),
+                new ShadowParam("_SssColorBleedAoWeights",    "AOカラーブリード", ShadowParamType.Vector, ShadowParamGroup.ShadowSettings),
+                new ShadowParam("_ShadowStrength",      "影強度",              ShadowParamType.Float,  ShadowParamGroup.ShadowSettings),
+                new ShadowParam("_LightingIgnoreAmbientColor","間接光の影色を無視", ShadowParamType.Float, ShadowParamGroup.ShadowSettings),
+            },
+            // 他の7方式（Wrapped/ShadeMap/Flat/Realistic/Cloth/SDF/TextureRamp）は対応しない。
             // マットキャップ等テクスチャベースの方式が多く、テクスチャは一括コピー対象外の方針と相性が悪いため。
             // 必要になれば[モード番号]をキーに追加すれば拡張できる。
         };
+        private const int POIYOMI_LIGHTING_MODE_SKIN = 3;
+        private const string POIYOMI_SKIN_LUT_PROP = "_SkinLUT";
         private const int POIYOMI_DEFAULT_LIGHTING_MODE = 1; // Multilayer Math（フォールバック先）
 
         // 影カテゴリの実同期時は POIYOMI_LIGHTDATA_PARAMS（常時）＋ POIYOMI_SHADOWS_PARAMS_BY_MODE[現在の_LightingMode]（無ければ[1]）を合算して使う。
@@ -151,6 +164,11 @@ namespace qsyi
             new ShadowParam("_BacklightBackfaceMask",   "裏面で無効化",       ShadowParamType.Float, ShadowParamGroup.Backlight),
         };
 
+        // アウトラインはON/OFFのみ（幅・色などの詳細は同期しない）
+        private static readonly ShadowParam[] POIYOMI_OUTLINE_PARAMS = {
+            new ShadowParam("_EnableOutlines", "アウトラインON/OFF", ShadowParamType.Float, ShadowParamGroup.Outline),
+        };
+
         // 各カテゴリのON/OFFマスタースイッチ（liltoon版の_UseShadow等に相当）
         // 影: _ShadingEnabled / リムライト: _EnableRimLighting / リムシェード: _EnableRim2Lighting / 逆光ライト: _BacklightEnabled
 
@@ -166,6 +184,118 @@ namespace qsyi
         // 影カテゴリのみ「影色」「影数値」に分けて個別ON/OFFできる（liltoon版と同じ構成）
         private bool _poiShadowSyncColorEnabled;
         private bool _poiShadowSyncNumEnabled;
+        // ライトデータ（ライトの色・方向・加算ライト・ライトボリューム等）。ライティング方式に依らない項目なので影色/影数値とは別に選べる
+        private bool _poiShadowSyncLightDataEnabled;
+        private Toggle _poiShadowLightDataToggle;
+        private Label _poiShadowSyncStatusLabel;
+
+        private bool AllPoiyomiShadowSubOn() =>
+            _poiShadowSyncColorEnabled && _poiShadowSyncNumEnabled && _poiShadowSyncLightDataEnabled;
+
+        private static readonly Color POIYOMI_WARN_COLOR = new Color(0.95f, 0.65f, 0.15f);
+
+        private static bool IsPoiyomiMaterial(Material m)
+        {
+            var k = GetMaterialShaderKind(m);
+            return k == MaterialShaderKind.PoiyomiPro || k == MaterialShaderKind.PoiyomiToon;
+        }
+
+        // Thryでロック（最適化）されたマテリアルは専用のシェーダーに差し替わっていて、値を書いても反映されない
+        private static bool IsPoiyomiLocked(Material m)
+        {
+            if (m == null) return false;
+            if (m.shader != null && m.shader.name.StartsWith("Hidden/Locked/", StringComparison.Ordinal)) return true;
+            return m.HasProperty("_ShaderOptimizerEnabled") && m.GetFloat("_ShaderOptimizerEnabled") > 0.5f;
+        }
+
+        private enum PoiyomiDestState { Ok, NotPoiyomi, Locked }
+
+        private static PoiyomiDestState GetPoiyomiDestState(Material m) =>
+            IsPoiyomiLocked(m) ? PoiyomiDestState.Locked
+            : IsPoiyomiMaterial(m) ? PoiyomiDestState.Ok
+            : PoiyomiDestState.NotPoiyomi;
+
+        private static string PoiyomiLightingModeName(int mode)
+        {
+            switch (mode)
+            {
+                case 0: return "Texture Ramp";
+                case 1: return "Multilayer Math";
+                case 2: return "Wrapped";
+                case 3: return "Skin";
+                case 4: return "Shade Map";
+                case 5: return "Flat";
+                case 6: return "Realistic";
+                case 7: return "Cloth";
+                case 8: return "SDF";
+                default: return "不明";
+            }
+        }
+
+        private bool TryGetPoiyomiSourceRawMode(out int mode)
+        {
+            mode = -1;
+            if (_poiShadowSyncSource == null || !_poiShadowSyncSource.HasProperty("_LightingMode")) return false;
+            mode = Mathf.RoundToInt(_poiShadowSyncSource.GetFloat("_LightingMode"));
+            return true;
+        }
+
+        // コピー元のライティング方式で影色・影数値を同期できるか（プリセットは対応方式のみ記録しているので常にtrue）
+        private bool IsPoiyomiSyncShadowSupported()
+        {
+            if (_poiShadowSyncSource == null) return true;
+            return TryGetPoiyomiSourceRawMode(out var m) && POIYOMI_SHADOWS_PARAMS_BY_MODE.ContainsKey(m);
+        }
+
+        private static Label MakePoiyomiBadge(string text, Color color, string tooltip = null)
+        {
+            var badge = new Label(text);
+            badge.style.fontSize = 9;
+            badge.style.color    = color;
+            badge.style.borderTopWidth = badge.style.borderBottomWidth =
+                badge.style.borderLeftWidth = badge.style.borderRightWidth = 1;
+            badge.style.borderTopColor = badge.style.borderBottomColor =
+                badge.style.borderLeftColor = badge.style.borderRightColor = color;
+            badge.style.paddingLeft = badge.style.paddingRight = 3;
+            badge.style.marginLeft  = 4;
+            badge.style.flexShrink  = 0;
+            if (tooltip != null) badge.tooltip = tooltip;
+            return badge;
+        }
+
+        private void RefreshPoiyomiShadowSyncStatus()
+        {
+            if (_poiShadowSyncStatusLabel == null) return;
+            string text = null;
+            bool warn = false;
+            if (_poiShadowSyncSource != null)
+            {
+                if (!IsPoiyomiMaterial(_poiShadowSyncSource))
+                {
+                    text = "Poiyomiのマテリアルではないため、同期できる項目がありません。";
+                    warn = true;
+                }
+                else if (TryGetPoiyomiSourceRawMode(out var mode))
+                {
+                    string name = PoiyomiLightingModeName(mode);
+                    if (IsPoiyomiSyncShadowSupported())
+                        text = $"ライティング方式: {name}";
+                    else
+                    {
+                        text = $"ライティング方式「{name}」は未対応のため、影色・影数値は同期されません（ライトデータ・リムライト等は同期されます）。";
+                        warn = true;
+                    }
+                }
+            }
+            else if (_poiActiveShadowPreset != null)
+            {
+                text = $"ライティング方式: {PoiyomiLightingModeName(GetPoiyomiPresetLightingMode(_poiActiveShadowPreset))}（プリセット）";
+            }
+
+            _poiShadowSyncStatusLabel.text = text ?? "";
+            _poiShadowSyncStatusLabel.style.display = text == null ? DisplayStyle.None : DisplayStyle.Flex;
+            _poiShadowSyncStatusLabel.style.color   = warn ? POIYOMI_WARN_COLOR : DimColor;
+        }
         private Toggle _poiShadowShadowToggle;
         private Toggle _poiShadowColorToggle;
         private Toggle _poiShadowNumToggle;
@@ -188,12 +318,86 @@ namespace qsyi
 
         // 影テーブル(LightData+Shadows[Multilayer Math]) + リムライト + リムシェード + 逆光ライトの全項目を横断するヘルパー。
         // プリセット保存プレビューとプリセット保存本体で共通利用する。
-        private static IEnumerable<ShadowParam> AllPoiyomiShadowParams() =>
-            POIYOMI_LIGHTDATA_PARAMS
-                .Concat(POIYOMI_SHADOWS_PARAMS_BY_MODE[POIYOMI_DEFAULT_LIGHTING_MODE])
+        private static IEnumerable<ShadowParam> AllPoiyomiShadowParams(int lightingMode) =>
+            PoiyomiShadowTable(lightingMode)
                 .Concat(POIYOMI_RIM0_PARAMS)
                 .Concat(POIYOMI_RIM1_PARAMS)
-                .Concat(POIYOMI_BACKLIGHT_PARAMS);
+                .Concat(POIYOMI_BACKLIGHT_PARAMS)
+                .Concat(POIYOMI_OUTLINE_PARAMS);
+
+        // 影カテゴリ（LightData + 指定ライティング方式のShadows）。未対応の方式はMultilayer Mathの表にフォールバック。
+        private static IEnumerable<ShadowParam> PoiyomiShadowTable(int lightingMode) =>
+            POIYOMI_LIGHTDATA_PARAMS.Concat(POIYOMI_SHADOWS_PARAMS_BY_MODE.TryGetValue(lightingMode, out var t)
+                ? t : POIYOMI_SHADOWS_PARAMS_BY_MODE[POIYOMI_DEFAULT_LIGHTING_MODE]);
+
+        // プリセットに保存された_LightingMode。無い（Multilayer Math時代の既存プリセット等）場合は既定値。
+        private static int GetPoiyomiPresetLightingMode(ShadowSyncPresetEntry preset)
+        {
+            var p = preset?.props.FirstOrDefault(x => x.key == "_LightingMode");
+            if (p == null) return POIYOMI_DEFAULT_LIGHTING_MODE;
+            int mode = Mathf.RoundToInt(p.value);
+            return POIYOMI_SHADOWS_PARAMS_BY_MODE.ContainsKey(mode) ? mode : POIYOMI_DEFAULT_LIGHTING_MODE;
+        }
+
+        // 同期に使うライティング方式（コピー元マテリアル優先、無ければ選択中プリセット）。未対応の方式は既定値。
+        private int GetPoiyomiSyncLightingMode()
+        {
+            if (_poiShadowSyncSource != null)
+            {
+                if (!_poiShadowSyncSource.HasProperty("_LightingMode")) return POIYOMI_DEFAULT_LIGHTING_MODE;
+                int mode = Mathf.RoundToInt(_poiShadowSyncSource.GetFloat("_LightingMode"));
+                return POIYOMI_SHADOWS_PARAMS_BY_MODE.ContainsKey(mode) ? mode : POIYOMI_DEFAULT_LIGHTING_MODE;
+            }
+            return GetPoiyomiPresetLightingMode(_poiActiveShadowPreset);
+        }
+
+        // Skin LUTを取得する（コピー元マテリアル優先、無ければ選択中プリセット）
+        private bool TryGetPoiyomiSkinLut(out Texture tex, out Vector2 scale, out Vector2 offset)
+        {
+            if (_poiShadowSyncSource != null)
+            {
+                if (_poiShadowSyncSource.HasProperty(POIYOMI_SKIN_LUT_PROP))
+                {
+                    tex    = _poiShadowSyncSource.GetTexture(POIYOMI_SKIN_LUT_PROP);
+                    scale  = _poiShadowSyncSource.GetTextureScale(POIYOMI_SKIN_LUT_PROP);
+                    offset = _poiShadowSyncSource.GetTextureOffset(POIYOMI_SKIN_LUT_PROP);
+                    return tex != null;
+                }
+            }
+            else
+            {
+                var p = _poiActiveShadowPreset?.props.FirstOrDefault(x => x.key == POIYOMI_SKIN_LUT_PROP);
+                if (p != null && p.texture != null)
+                {
+                    tex = p.texture; scale = new Vector2(p.r, p.g); offset = new Vector2(p.b, p.a);
+                    return true;
+                }
+            }
+            tex = null; scale = Vector2.one; offset = Vector2.zero;
+            return false;
+        }
+
+        // Skin表示用の要素（ライティング方式に応じて表示を切り替える）
+        private readonly List<VisualElement> _poiShadowMultilayerSwatchEls = new List<VisualElement>();
+        private readonly List<VisualElement> _poiShadowSkinSwatchEls       = new List<VisualElement>();
+        private readonly List<Image>         _poiShadowSkinLutImages       = new List<Image>();
+
+        private static Image MakePoiyomiLutThumb(float size, float radius)
+        {
+            var img = new Image { scaleMode = ScaleMode.StretchToFill };
+            img.style.width      = size;
+            img.style.height     = size;
+            img.style.flexShrink = 0;
+            img.style.overflow   = Overflow.Hidden;
+            img.style.borderTopLeftRadius = img.style.borderTopRightRadius =
+                img.style.borderBottomLeftRadius = img.style.borderBottomRightRadius = radius;
+            img.style.borderTopWidth = img.style.borderBottomWidth =
+                img.style.borderLeftWidth = img.style.borderRightWidth = 1;
+            img.style.borderTopColor = img.style.borderBottomColor =
+                img.style.borderLeftColor = img.style.borderRightColor = PaneBorderColor;
+            img.style.display = DisplayStyle.None;
+            return img;
+        }
 
         // カテゴリ見出しのスウォッチに使う色プロパティ（liltoon版の各カテゴリ見出しと同じ考え方。影は4色まとめて表示）
         private static readonly Dictionary<PoiyomiShadowParamGroup, string[]> POIYOMI_SWATCH_PROPS = new Dictionary<PoiyomiShadowParamGroup, string[]>
@@ -202,6 +406,7 @@ namespace qsyi
             [PoiyomiShadowParamGroup.RimLight]  = new[] { "_RimLightColor" },
             [PoiyomiShadowParamGroup.RimShade]  = new[] { "_Rim2LightColor" },
             [PoiyomiShadowParamGroup.Backlight] = new[] { "_BacklightColor" },
+            [PoiyomiShadowParamGroup.Outline]   = new string[0],
         };
 
         private VisualElement BuildPoiyomiShadowSyncSubPane()
@@ -280,6 +485,19 @@ namespace qsyi
             });
 
             pane.Add(srcCard);
+
+            _poiShadowSyncStatusLabel = new Label();
+            _poiShadowSyncStatusLabel.style.fontSize          = 10;
+            _poiShadowSyncStatusLabel.style.whiteSpace        = WhiteSpace.Normal;
+            _poiShadowSyncStatusLabel.style.paddingLeft       = 10;
+            _poiShadowSyncStatusLabel.style.paddingRight      = 10;
+            _poiShadowSyncStatusLabel.style.paddingTop        = 3;
+            _poiShadowSyncStatusLabel.style.paddingBottom     = 3;
+            _poiShadowSyncStatusLabel.style.flexShrink        = 0;
+            _poiShadowSyncStatusLabel.style.borderBottomWidth = 1;
+            _poiShadowSyncStatusLabel.style.borderBottomColor = PaneBorderColor;
+            _poiShadowSyncStatusLabel.style.display           = DisplayStyle.None;
+            pane.Add(_poiShadowSyncStatusLabel);
 
             // ── プリセット棚（liltoon版と同じ見た目・構造） ──
             var presetRow = new VisualElement();
@@ -362,13 +580,19 @@ namespace qsyi
             _poiShadowSyncMasterToggle.Q<Label>(className: "unity-toggle__label")?.RemoveFromHierarchy();
             _poiShadowSyncMasterToggle.RegisterValueChangedCallback(evt =>
             {
-                _poiShadowSyncEnabledCategories.Clear();
-                if (evt.newValue)
-                    foreach (var g in new[] { PoiyomiShadowParamGroup.RimLight, PoiyomiShadowParamGroup.RimShade, PoiyomiShadowParamGroup.Backlight })
-                        _poiShadowSyncEnabledCategories.Add(g);
-                _poiShadowSyncColorEnabled = evt.newValue;
-                _poiShadowSyncNumEnabled   = evt.newValue;
-                foreach (var t in _poiShadowCategoryToggles) t.SetValueWithoutNotify(evt.newValue);
+                // アウトラインは「全項目」に含めない（ON/OFFを意図せず上書きしないよう個別に選ぶ）
+                var masterGroups = new[] { PoiyomiShadowParamGroup.RimLight, PoiyomiShadowParamGroup.RimShade, PoiyomiShadowParamGroup.Backlight };
+                foreach (var g in masterGroups)
+                {
+                    if (evt.newValue) _poiShadowSyncEnabledCategories.Add(g);
+                    else              _poiShadowSyncEnabledCategories.Remove(g);
+                }
+                _poiShadowSyncColorEnabled     = evt.newValue;
+                _poiShadowSyncNumEnabled       = evt.newValue;
+                _poiShadowSyncLightDataEnabled = evt.newValue;
+                for (int i = 0; i < masterGroups.Length && i < _poiShadowCategoryToggles.Count; i++)
+                    _poiShadowCategoryToggles[i].SetValueWithoutNotify(evt.newValue);
+                _poiShadowLightDataToggle?.SetValueWithoutNotify(evt.newValue);
                 _poiShadowShadowToggle?.SetValueWithoutNotify(evt.newValue);
                 _poiShadowColorToggle?.SetValueWithoutNotify(evt.newValue);
                 _poiShadowNumToggle?.SetValueWithoutNotify(evt.newValue);
@@ -376,6 +600,7 @@ namespace qsyi
             });
             masterRow.Add(_poiShadowSyncMasterToggle);
 
+            masterRow.tooltip = "影・リムライト1/2・逆光ライトをまとめてON/OFFします（アウトラインは含みません）";
             var masterLbl = new Label("全項目を同期");
             masterLbl.style.fontSize                = 11;
             masterLbl.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -386,9 +611,10 @@ namespace qsyi
             leftScroll.Add(masterRow);
             _poiShadowCategoryToggles.Clear();
 
-            void AddCategoryToggle(string label, PoiyomiShadowParamGroup group)
+            void AddCategoryToggle(string label, PoiyomiShadowParamGroup group, string tooltip = null)
             {
                 var row = new VisualElement();
+                if (tooltip != null) row.tooltip = tooltip;
                 row.style.flexDirection     = FlexDirection.Row;
                 row.style.alignItems        = Align.Center;
                 row.style.paddingLeft       = 6;
@@ -446,6 +672,7 @@ namespace qsyi
             AddCategoryToggle("リムライト1", PoiyomiShadowParamGroup.RimLight);
             AddCategoryToggle("リムライト2", PoiyomiShadowParamGroup.RimShade);
             AddCategoryToggle("逆光ライト", PoiyomiShadowParamGroup.Backlight);
+            AddCategoryToggle("アウトライン", PoiyomiShadowParamGroup.Outline, "オン/オフの状態だけをコピーします（太さ・色などは同期しません）");
             UpdatePoiyomiMasterToggle();
 
             leftPane.Add(leftScroll);
@@ -499,7 +726,7 @@ namespace qsyi
 
             _poiShadowSyncAllSelBtn = new Button(() =>
             {
-                var avail = _materials.Where(m => m != null && m != _poiShadowSyncSource).ToList();
+                var avail = _materials.Where(m => m != null && m != _poiShadowSyncSource && GetPoiyomiDestState(m) == PoiyomiDestState.Ok).ToList();
                 bool allSel = avail.Count > 0 && avail.All(m => _poiShadowSyncDestSet.Contains(m));
                 if (allSel) _poiShadowSyncDestSet.Clear();
                 else        foreach (var m in avail) _poiShadowSyncDestSet.Add(m);
@@ -613,6 +840,7 @@ namespace qsyi
 
         private void RefreshPoiyomiShadowSyncSourceCard()
         {
+            RefreshPoiyomiShadowSyncStatus();
             _poiShadowSyncSourceField?.SetValueWithoutNotify(_poiShadowSyncSource);
             if (_poiShadowSyncSlotButton != null)
             {
@@ -642,6 +870,17 @@ namespace qsyi
                 bool isNone = has && raw.a <= 0.0001f;
                 var color = has ? AdjustColor(raw, _poiShadowHueShift, _poiShadowSaturationScale) : new Color(0.25f, 0.25f, 0.25f);
                 foreach (var update in kv.Value) update(color, isNone);
+            }
+
+            bool skin = GetPoiyomiSyncLightingMode() == POIYOMI_LIGHTING_MODE_SKIN;
+            foreach (var el in _poiShadowMultilayerSwatchEls) el.style.display = skin ? DisplayStyle.None : DisplayStyle.Flex;
+            foreach (var el in _poiShadowSkinSwatchEls)       el.style.display = skin ? DisplayStyle.Flex : DisplayStyle.None;
+            Texture lutTex = null;
+            bool hasLut = skin && TryGetPoiyomiSkinLut(out lutTex, out _, out _);
+            foreach (var img in _poiShadowSkinLutImages)
+            {
+                img.image         = hasLut ? lutTex : null;
+                img.style.display = hasLut ? DisplayStyle.Flex : DisplayStyle.None;
             }
         }
 
@@ -689,7 +928,7 @@ namespace qsyi
         private void UpdatePoiyomiMasterToggle()
         {
             if (_poiShadowSyncMasterToggle == null) return;
-            bool allOn = _poiShadowSyncColorEnabled && _poiShadowSyncNumEnabled
+            bool allOn = AllPoiyomiShadowSubOn()
                 && _poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.RimLight)
                 && _poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.RimShade)
                 && _poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.Backlight);
@@ -702,6 +941,25 @@ namespace qsyi
             var shadowContent = new VisualElement();
             shadowContent.style.display = DisplayStyle.None;
             bool[] shadowOpen = { false };
+            _poiShadowMultilayerSwatchEls.Clear();
+            _poiShadowSkinSwatchEls.Clear();
+            _poiShadowSkinLutImages.Clear();
+
+            // Skin時は影色の代わりに「影のティント＋LUT」を見せる
+            void AddSkinSwatches(VisualElement row, float size, float radius)
+            {
+                var tint = MakeShadowSwatchVisual(size, radius, out var update, showAlphaLabel: false);
+                tint.style.marginLeft = 3;
+                tint.style.display    = DisplayStyle.None;
+                RegisterPoiyomiColorBox("_LightingShadowColor", update);
+                _poiShadowSkinSwatchEls.Add(tint);
+                row.Add(tint);
+
+                var lut = MakePoiyomiLutThumb(size, radius);
+                lut.style.marginLeft = 3;
+                _poiShadowSkinLutImages.Add(lut);
+                row.Add(lut);
+            }
 
             var hdr = new VisualElement();
             hdr.style.flexDirection     = FlexDirection.Row;
@@ -714,20 +972,22 @@ namespace qsyi
             hdr.style.borderTopColor    = PaneBorderColor;
             hdr.style.borderBottomWidth = 1;
             hdr.style.borderBottomColor = PaneBorderColor;
-            hdr.tooltip = "対応しているのはMultilayer Mathのみです。他のライティング方式（Skin/Wrapped等）のマテリアルは正しく同期されません。";
+            hdr.tooltip = "対応しているのはMultilayer MathとSkinです。他のライティング方式（Wrapped等）のマテリアルは正しく同期されません。Skinはコピー元のLUTテクスチャを同じ参照でコピー先に設定します（厚みマップはコピーしません）。";
 
             _poiShadowShadowToggle = new Toggle();
-            _poiShadowShadowToggle.value = _poiShadowSyncColorEnabled && _poiShadowSyncNumEnabled;
+            _poiShadowShadowToggle.value = AllPoiyomiShadowSubOn();
             _poiShadowShadowToggle.style.marginRight = 2;
             _poiShadowShadowToggle.style.flexShrink  = 0;
             _poiShadowShadowToggle.Q<Label>(className: "unity-toggle__label")?.RemoveFromHierarchy();
             _poiShadowShadowToggle.RegisterCallback<MouseDownEvent>(e => e.StopPropagation());
             _poiShadowShadowToggle.RegisterValueChangedCallback(evt =>
             {
-                _poiShadowSyncColorEnabled = evt.newValue;
-                _poiShadowSyncNumEnabled   = evt.newValue;
+                _poiShadowSyncColorEnabled     = evt.newValue;
+                _poiShadowSyncNumEnabled       = evt.newValue;
+                _poiShadowSyncLightDataEnabled = evt.newValue;
                 _poiShadowColorToggle?.SetValueWithoutNotify(evt.newValue);
                 _poiShadowNumToggle?.SetValueWithoutNotify(evt.newValue);
+                _poiShadowLightDataToggle?.SetValueWithoutNotify(evt.newValue);
                 UpdatePoiyomiMasterToggle();
                 UpdatePoiyomiShadowSyncButtons();
             });
@@ -754,8 +1014,10 @@ namespace qsyi
                 var swatch = MakeShadowSwatchVisual(26, 4, out var update);
                 swatch.style.marginLeft = 3;
                 RegisterPoiyomiColorBox(prop, update);
+                _poiShadowMultilayerSwatchEls.Add(swatch);
                 hdr.Add(swatch);
             }
+            AddSkinSwatches(hdr, 26, 4);
 
             var chevron = new Label("▶");
             chevron.style.fontSize     = 10;
@@ -797,7 +1059,7 @@ namespace qsyi
                 _poiShadowColorToggle.RegisterValueChangedCallback(evt =>
                 {
                     _poiShadowSyncColorEnabled = evt.newValue;
-                    _poiShadowShadowToggle?.SetValueWithoutNotify(_poiShadowSyncColorEnabled && _poiShadowSyncNumEnabled);
+                    _poiShadowShadowToggle?.SetValueWithoutNotify(AllPoiyomiShadowSubOn());
                     UpdatePoiyomiMasterToggle();
                     UpdatePoiyomiShadowSyncButtons();
                 });
@@ -814,8 +1076,10 @@ namespace qsyi
                     var swatch = MakeShadowSwatchVisual(20, 3, out var update, showAlphaLabel: false);
                     swatch.style.marginLeft = 3;
                     RegisterPoiyomiColorBox(prop, update);
+                    _poiShadowMultilayerSwatchEls.Add(swatch);
                     row.Add(swatch);
                 }
+                AddSkinSwatches(row, 20, 3);
 
                 shadowContent.Add(row);
             }
@@ -841,7 +1105,7 @@ namespace qsyi
                 _poiShadowNumToggle.RegisterValueChangedCallback(evt =>
                 {
                     _poiShadowSyncNumEnabled = evt.newValue;
-                    _poiShadowShadowToggle?.SetValueWithoutNotify(_poiShadowSyncColorEnabled && _poiShadowSyncNumEnabled);
+                    _poiShadowShadowToggle?.SetValueWithoutNotify(AllPoiyomiShadowSubOn());
                     UpdatePoiyomiMasterToggle();
                     UpdatePoiyomiShadowSyncButtons();
                 });
@@ -857,6 +1121,44 @@ namespace qsyi
                 shadowContent.Add(row);
             }
 
+            // ── ライトデータ ──
+            {
+                var row = new VisualElement();
+                row.style.flexDirection     = FlexDirection.Row;
+                row.style.alignItems        = Align.Center;
+                row.style.paddingLeft       = 20;
+                row.style.paddingRight      = 8;
+                row.style.paddingTop        = 4;
+                row.style.paddingBottom     = 4;
+                row.style.borderBottomWidth = 1;
+                row.style.borderBottomColor = PaneBorderColor;
+                row.tooltip = "ライトの色・方向・明るさ上限・加算ライト・ライトボリュームなど、ライティング全般の設定です（ライティング方式に依らない項目）";
+
+                _poiShadowLightDataToggle = new Toggle();
+                _poiShadowLightDataToggle.value = _poiShadowSyncLightDataEnabled;
+                _poiShadowLightDataToggle.style.marginRight = 2;
+                _poiShadowLightDataToggle.style.flexShrink  = 0;
+                _poiShadowLightDataToggle.Q<Label>(className: "unity-toggle__label")?.RemoveFromHierarchy();
+                _poiShadowLightDataToggle.RegisterCallback<MouseDownEvent>(e => e.StopPropagation());
+                _poiShadowLightDataToggle.RegisterValueChangedCallback(evt =>
+                {
+                    _poiShadowSyncLightDataEnabled = evt.newValue;
+                    _poiShadowShadowToggle?.SetValueWithoutNotify(AllPoiyomiShadowSubOn());
+                    UpdatePoiyomiMasterToggle();
+                    UpdatePoiyomiShadowSyncButtons();
+                });
+                row.Add(_poiShadowLightDataToggle);
+
+                var lightTitle = new Label("ライトデータ");
+                lightTitle.style.fontSize   = 10;
+                lightTitle.style.color      = DimColor;
+                lightTitle.style.flexGrow   = 1;
+                lightTitle.style.marginLeft = 3;
+                row.Add(lightTitle);
+
+                shadowContent.Add(row);
+            }
+
             leftScroll.Add(shadowContent);
         }
 
@@ -866,6 +1168,7 @@ namespace qsyi
 
             _poiShadowSyncSourceField?.SetValueWithoutNotify(_poiShadowSyncSource);
             _poiShadowSyncDestSet.IntersectWith(_materials);
+            _poiShadowSyncDestSet.RemoveWhere(m => m == null || GetPoiyomiDestState(m) != PoiyomiDestState.Ok);
             _poiShadowSyncListEl.Clear();
 
             bool dark = EditorGUIUtility.isProSkin;
@@ -887,6 +1190,8 @@ namespace qsyi
             {
                 if (mat == null || mat == _poiShadowSyncSource) continue;
                 var matRef = mat;
+                var destState = GetPoiyomiDestState(mat);
+                bool eligible = destState == PoiyomiDestState.Ok;
 
                 var row = new VisualElement();
                 row.style.flexDirection     = FlexDirection.Row;
@@ -897,10 +1202,18 @@ namespace qsyi
                 row.style.paddingBottom     = 5;
                 row.style.borderBottomWidth = 1;
                 row.style.borderBottomColor = PaneBorderColor;
+                if (!eligible)
+                {
+                    row.style.opacity = 0.45f;
+                    row.tooltip = destState == PoiyomiDestState.Locked
+                        ? "Poiyomiでロック（最適化）されているため同期できません。Poiyomiのインスペクターで Unlock してから実行してください。"
+                        : "Poiyomiシェーダーのマテリアルではないため同期できません。";
+                }
                 row.RegisterCallback<MouseDownEvent>(_ => EditorGUIUtility.PingObject(matRef));
 
                 var chk = new Toggle();
-                chk.value             = _poiShadowSyncDestSet.Contains(mat);
+                chk.value             = eligible && _poiShadowSyncDestSet.Contains(mat);
+                chk.SetEnabled(eligible);
                 chk.style.marginRight = 4;
                 chk.style.marginTop   = 7;
                 chk.style.flexShrink  = 0;
@@ -942,12 +1255,37 @@ namespace qsyi
                 rightCol.style.flexShrink = 1;
                 rightCol.style.minWidth   = 0;
 
+                var nameRow = new VisualElement();
+                nameRow.style.flexDirection = FlexDirection.Row;
+                nameRow.style.alignItems    = Align.Center;
+
                 var nameLbl = new Label(mat.name);
                 nameLbl.style.fontSize                = 12;
                 nameLbl.style.unityFontStyleAndWeight = FontStyle.Bold;
                 nameLbl.style.color                   = TextColor;
+                nameLbl.style.flexGrow                = 1;
+                nameLbl.style.flexShrink              = 1;
+                nameLbl.style.minWidth                = 0;
                 nameLbl.style.overflow                = Overflow.Hidden;
-                rightCol.Add(nameLbl);
+                nameLbl.style.textOverflow            = TextOverflow.Ellipsis;
+                nameLbl.style.whiteSpace              = WhiteSpace.NoWrap;
+                nameRow.Add(nameLbl);
+
+                var kind = GetMaterialShaderKind(mat);
+                nameRow.Add(MakePoiyomiBadge(ShaderKindLabel(kind), ShaderKindColor(kind)));
+                if (destState == PoiyomiDestState.Locked)
+                    nameRow.Add(MakePoiyomiBadge("ロック中", POIYOMI_WARN_COLOR));
+                else if (eligible && mat.HasProperty("_LightingMode"))
+                {
+                    int destMode = Mathf.RoundToInt(mat.GetFloat("_LightingMode"));
+                    bool willSwitch = HasActivePoiyomiSource && IsPoiyomiSyncShadowSupported()
+                        && destMode != GetPoiyomiSyncLightingMode();
+                    nameRow.Add(MakePoiyomiBadge(
+                        PoiyomiLightingModeName(destMode),
+                        willSwitch ? POIYOMI_WARN_COLOR : DimColor,
+                        willSwitch ? $"影色・影数値を同期すると、ライティング方式がコピー元の「{PoiyomiLightingModeName(GetPoiyomiSyncLightingMode())}」に切り替わります。" : null));
+                }
+                rightCol.Add(nameRow);
 
                 if (_materialUsage.TryGetValue(mat, out var usages) && usages.Count > 0)
                 {
@@ -1019,7 +1357,7 @@ namespace qsyi
         {
             if (_poiShadowSyncCountLabel != null)
             {
-                int avail = _materials.Count(m => m != null && m != _poiShadowSyncSource);
+                int avail = _materials.Count(m => m != null && m != _poiShadowSyncSource && GetPoiyomiDestState(m) == PoiyomiDestState.Ok);
                 _poiShadowSyncCountLabel.text = $"コピー先 ({_poiShadowSyncDestSet.Count}/{avail})";
             }
             if (_poiShadowSyncSyncBtn != null)
@@ -1038,7 +1376,7 @@ namespace qsyi
         }
 
         private bool HasAnyPoiyomiCategoryEnabled() =>
-            _poiShadowSyncEnabledCategories.Count > 0 || _poiShadowSyncColorEnabled || _poiShadowSyncNumEnabled;
+            _poiShadowSyncEnabledCategories.Count > 0 || _poiShadowSyncColorEnabled || _poiShadowSyncNumEnabled || _poiShadowSyncLightDataEnabled;
 
         private void ExecutePoiyomiShadowSync()
         {
@@ -1049,7 +1387,10 @@ namespace qsyi
             int undoGroup = Undo.GetCurrentGroup();
             Undo.SetCurrentGroupName("Poiyomi Shadow Sync");
 
-            foreach (var dest in _poiShadowSyncDestSet.Where(m => m != null))
+            var targets = _poiShadowSyncDestSet.Where(m => m != null && GetPoiyomiDestState(m) == PoiyomiDestState.Ok).ToList();
+            int skipped = _poiShadowSyncDestSet.Count - targets.Count;
+
+            foreach (var dest in targets)
             {
                 Undo.RecordObject(dest, "Poiyomi Shadow Sync");
                 CopyPoiyomiShadowSyncToMaterial(dest);
@@ -1060,38 +1401,53 @@ namespace qsyi
             }
 
             Undo.CollapseUndoOperations(undoGroup);
+
+            string msg = $"{targets.Count}件のマテリアルに同期しました";
+            if (skipped > 0)
+                msg += $"（{skipped}件はロック中などのためスキップ）";
+            if ((_poiShadowSyncColorEnabled || _poiShadowSyncNumEnabled) && !IsPoiyomiSyncShadowSupported())
+                msg += "\n未対応のライティング方式のため、影色・影数値は同期していません";
+            ShowNotification(new GUIContent(msg));
         }
 
         private void CopyPoiyomiShadowSyncToMaterial(Material dest)
         {
             if (!HasActivePoiyomiSource || dest == null) return;
 
-            if (_poiShadowSyncColorEnabled || _poiShadowSyncNumEnabled)
+            if (_poiShadowSyncColorEnabled || _poiShadowSyncNumEnabled || _poiShadowSyncLightDataEnabled)
             {
-                int lightingMode = POIYOMI_DEFAULT_LIGHTING_MODE;
-                if (_poiShadowSyncSource != null)
-                {
-                    lightingMode = _poiShadowSyncSource.HasProperty("_LightingMode")
-                        ? (int)_poiShadowSyncSource.GetFloat("_LightingMode")
-                        : POIYOMI_DEFAULT_LIGHTING_MODE;
-                    if (!POIYOMI_SHADOWS_PARAMS_BY_MODE.ContainsKey(lightingMode))
-                        lightingMode = POIYOMI_DEFAULT_LIGHTING_MODE;
-                }
-
-                // 値だけでなくモード自体をコピー先に強制しないと、コピー先の見た目のモードが違う場合に値が反映されない。
-                // プリセットのみの場合はモード自体を保存していないため、Multilayer Math固定として扱う。
-                if (dest.HasProperty("_LightingMode"))
-                    dest.SetFloat("_LightingMode", _poiShadowSyncSource != null && _poiShadowSyncSource.HasProperty("_LightingMode")
-                        ? _poiShadowSyncSource.GetFloat("_LightingMode")
-                        : POIYOMI_DEFAULT_LIGHTING_MODE);
                 if (dest.HasProperty("_ShadingEnabled"))
                     dest.SetFloat("_ShadingEnabled", 1f);
 
+                // ライトデータはライティング方式に依らない項目なので、方式が未対応でも同期できる
+                if (_poiShadowSyncLightDataEnabled)
+                    CopyPoiyomiParams(dest, POIYOMI_LIGHTDATA_PARAMS);
+            }
+
+            // 影色・影数値はライティング方式ごとに項目が違うため、対応方式のコピー元のときだけ同期する
+            if ((_poiShadowSyncColorEnabled || _poiShadowSyncNumEnabled) && IsPoiyomiSyncShadowSupported())
+            {
+                int lightingMode = GetPoiyomiSyncLightingMode();
+
+                // 値だけでなくモード自体をコピー先に強制しないと、コピー先の見た目のモードが違う場合に値が反映されない。
+                // プリセットの場合は保存時に記録した_LightingModeを使う（記録が無い旧プリセットはMultilayer Math）。
+                if (dest.HasProperty("_LightingMode"))
+                    dest.SetFloat("_LightingMode", lightingMode);
+
                 // 影色（Colorタイプ）は_poiShadowSyncColorEnabled、影数値（それ以外）は_poiShadowSyncNumEnabledで個別に絞り込む
                 bool ShadowFilter(ShadowParam sp) => sp.Type == ShadowParamType.Color ? _poiShadowSyncColorEnabled : _poiShadowSyncNumEnabled;
-                CopyPoiyomiParams(dest, POIYOMI_LIGHTDATA_PARAMS, ShadowFilter);
                 if (POIYOMI_SHADOWS_PARAMS_BY_MODE.TryGetValue(lightingMode, out var shadowParams))
                     CopyPoiyomiParams(dest, shadowParams, ShadowFilter);
+
+                // SkinのLUTは影の色味そのものを決めるため、影色トグルに連動させ、テクスチャを同じ参照のままコピーする
+                if (lightingMode == POIYOMI_LIGHTING_MODE_SKIN && _poiShadowSyncColorEnabled
+                    && dest.HasProperty(POIYOMI_SKIN_LUT_PROP)
+                    && TryGetPoiyomiSkinLut(out var lutTex, out var lutScale, out var lutOffset))
+                {
+                    dest.SetTexture(POIYOMI_SKIN_LUT_PROP, lutTex);
+                    dest.SetTextureScale(POIYOMI_SKIN_LUT_PROP, lutScale);
+                    dest.SetTextureOffset(POIYOMI_SKIN_LUT_PROP, lutOffset);
+                }
             }
 
             if (_poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.RimLight))
@@ -1113,6 +1469,9 @@ namespace qsyi
                 if (dest.HasProperty("_BacklightEnabled")) dest.SetFloat("_BacklightEnabled", 1f);
                 CopyPoiyomiParams(dest, POIYOMI_BACKLIGHT_PARAMS);
             }
+
+            if (_poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.Outline))
+                CopyPoiyomiParams(dest, POIYOMI_OUTLINE_PARAMS);
         }
 
         private void CopyPoiyomiParams(Material dest, ShadowParam[] table, Func<ShadowParam, bool> filter = null)
@@ -1246,16 +1605,23 @@ namespace qsyi
             var rim0Props = new HashSet<string>(POIYOMI_RIM0_PARAMS.Select(p => p.Prop));
             var rim1Props = new HashSet<string>(POIYOMI_RIM1_PARAMS.Select(p => p.Prop));
             var backProps = new HashSet<string>(POIYOMI_BACKLIGHT_PARAMS.Select(p => p.Prop));
+            var outlineProps = new HashSet<string>(POIYOMI_OUTLINE_PARAMS.Select(p => p.Prop));
+            var lightProps = new HashSet<string>(POIYOMI_LIGHTDATA_PARAMS.Select(p => p.Prop));
 
             bool IsIncluded(ShadowParam sp)
             {
                 if (rim0Props.Contains(sp.Prop)) return _poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.RimLight);
                 if (rim1Props.Contains(sp.Prop)) return _poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.RimShade);
                 if (backProps.Contains(sp.Prop)) return _poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.Backlight);
+                if (outlineProps.Contains(sp.Prop)) return _poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.Outline);
+                if (lightProps.Contains(sp.Prop)) return _poiShadowSyncLightDataEnabled;
+                // 未対応のライティング方式のコピー元は、方式別の項目（影色・影数値）が正しく読めないため初期状態では保存対象にしない
+                if (!IsPoiyomiSyncShadowSupported()) return false;
                 return sp.Type == ShadowParamType.Color ? _poiShadowSyncColorEnabled : _poiShadowSyncNumEnabled;
             }
 
-            foreach (var sp in AllPoiyomiShadowParams())
+            int mode = GetPoiyomiSyncLightingMode();
+            foreach (var sp in AllPoiyomiShadowParams(mode))
             {
                 bool included = IsIncluded(sp);
 
@@ -1276,6 +1642,10 @@ namespace qsyi
                     items.Add(new ShadowPresetSaveEntryData { prop = sp.Prop, label = sp.Label, isColor = false, valueText = text, group = sp.Group, included = included });
                 }
             }
+
+            // SkinのLUTはテクスチャ参照ごと保存する（影色トグルに連動）
+            if (mode == POIYOMI_LIGHTING_MODE_SKIN && TryGetPoiyomiSkinLut(out var lutTex, out _, out _))
+                items.Add(new ShadowPresetSaveEntryData { prop = POIYOMI_SKIN_LUT_PROP, label = "LUT", isTexture = true, texture = lutTex, group = ShadowParamGroup.ShadowSettings, included = _poiShadowSyncColorEnabled });
             return items;
         }
 
@@ -1294,7 +1664,8 @@ namespace qsyi
         private void DoSavePoiyomiPreset(string presetName, string category, HashSet<string> includedProps)
         {
             var entry = new ShadowSyncPresetEntry { name = presetName, category = category };
-            foreach (var sp in AllPoiyomiShadowParams())
+            int mode = GetPoiyomiSyncLightingMode();
+            foreach (var sp in AllPoiyomiShadowParams(mode))
             {
                 if (!includedProps.Contains(sp.Prop)) continue;
 
@@ -1313,6 +1684,15 @@ namespace qsyi
                         entry.props.Add(new ShadowSyncPresetProp { key = sp.Prop, value = raw.x });
                 }
             }
+
+            if (includedProps.Contains(POIYOMI_SKIN_LUT_PROP) && TryGetPoiyomiSkinLut(out var lutTex, out var lutScale, out var lutOffset))
+                entry.props.Add(new ShadowSyncPresetProp { key = POIYOMI_SKIN_LUT_PROP, texture = lutTex, r = lutScale.x, g = lutScale.y, b = lutOffset.x, a = lutOffset.y });
+
+            // 影を含むプリセットはライティング方式も記録する（読み込み時にSkin/Multilayer Mathを判別するため）
+            var shadowKeys = new HashSet<string>(PoiyomiShadowTable(mode).Select(sp => sp.Prop)) { POIYOMI_SKIN_LUT_PROP };
+            if (entry.props.Any(p => shadowKeys.Contains(p.key)))
+                entry.props.Add(new ShadowSyncPresetProp { key = "_LightingMode", value = mode });
+
             SavePoiyomiPreset(entry);
         }
 
@@ -1333,7 +1713,7 @@ namespace qsyi
             List<Color> PresetSwatchColors(ShadowSyncPresetEntry preset)
             {
                 var colors = new List<Color>();
-                foreach (var sp in AllPoiyomiShadowParams())
+                foreach (var sp in AllPoiyomiShadowParams(GetPoiyomiPresetLightingMode(preset)))
                 {
                     if (sp.Type != ShadowParamType.Color) continue;
                     var pp = preset.props.FirstOrDefault(x => x.key == sp.Prop);
@@ -1370,7 +1750,17 @@ namespace qsyi
                 strip.style.flexDirection = FlexDirection.Row;
                 strip.style.marginBottom  = 4;
                 var cols = PresetSwatchColors(p);
-                bool noCols = cols.Count == 0;
+                var lutProp = p.props.FirstOrDefault(x => x.key == POIYOMI_SKIN_LUT_PROP && x.texture != null);
+                if (lutProp != null)
+                {
+                    var lutThumb = MakePoiyomiLutThumb(26, 4);
+                    lutThumb.image         = lutProp.texture;
+                    lutThumb.style.display = DisplayStyle.Flex;
+                    lutThumb.style.marginRight = 2;
+                    strip.Add(lutThumb);
+                    if (cols.Count > 2) cols.RemoveRange(2, cols.Count - 2);
+                }
+                bool noCols = cols.Count == 0 && lutProp == null;
                 if (noCols) cols.Add(new Color(0.4f, 0.4f, 0.4f, 1f));
                 for (int i = 0; i < cols.Count; i++)
                 {
@@ -1488,29 +1878,33 @@ namespace qsyi
         private void RestorePoiyomiPresetCheckboxes(ShadowSyncPresetEntry preset)
         {
             var keys = new HashSet<string>(preset.props.Select(p => p.key));
-            var shadowTable = POIYOMI_LIGHTDATA_PARAMS.Concat(POIYOMI_SHADOWS_PARAMS_BY_MODE[POIYOMI_DEFAULT_LIGHTING_MODE]);
+            var shadowTable = POIYOMI_SHADOWS_PARAMS_BY_MODE[GetPoiyomiPresetLightingMode(preset)];
 
             bool HasAny(IEnumerable<ShadowParam> table, Func<ShadowParam, bool> pred = null) =>
                 table.Any(sp => (pred == null || pred(sp)) && keys.Contains(sp.Prop));
 
-            _poiShadowSyncColorEnabled = HasAny(shadowTable, sp => sp.Type == ShadowParamType.Color);
+            _poiShadowSyncColorEnabled = HasAny(shadowTable, sp => sp.Type == ShadowParamType.Color) || keys.Contains(POIYOMI_SKIN_LUT_PROP);
             _poiShadowSyncNumEnabled   = HasAny(shadowTable, sp => sp.Type != ShadowParamType.Color);
+            _poiShadowSyncLightDataEnabled = HasAny(POIYOMI_LIGHTDATA_PARAMS);
 
             _poiShadowSyncEnabledCategories.Clear();
             if (HasAny(POIYOMI_RIM0_PARAMS))      _poiShadowSyncEnabledCategories.Add(PoiyomiShadowParamGroup.RimLight);
             if (HasAny(POIYOMI_RIM1_PARAMS))      _poiShadowSyncEnabledCategories.Add(PoiyomiShadowParamGroup.RimShade);
             if (HasAny(POIYOMI_BACKLIGHT_PARAMS)) _poiShadowSyncEnabledCategories.Add(PoiyomiShadowParamGroup.Backlight);
+            if (HasAny(POIYOMI_OUTLINE_PARAMS))   _poiShadowSyncEnabledCategories.Add(PoiyomiShadowParamGroup.Outline);
 
-            _poiShadowShadowToggle?.SetValueWithoutNotify(_poiShadowSyncColorEnabled && _poiShadowSyncNumEnabled);
+            _poiShadowShadowToggle?.SetValueWithoutNotify(AllPoiyomiShadowSubOn());
             _poiShadowColorToggle?.SetValueWithoutNotify(_poiShadowSyncColorEnabled);
             _poiShadowNumToggle?.SetValueWithoutNotify(_poiShadowSyncNumEnabled);
+            _poiShadowLightDataToggle?.SetValueWithoutNotify(_poiShadowSyncLightDataEnabled);
 
-            // _poiShadowCategoryToggles はAddCategoryToggle呼び出し順（リムライト1→リムライト2→逆光ライト）で並んでいる
-            if (_poiShadowCategoryToggles.Count >= 3)
+            // _poiShadowCategoryToggles はAddCategoryToggle呼び出し順（リムライト1→リムライト2→逆光ライト→アウトライン）で並んでいる
+            if (_poiShadowCategoryToggles.Count >= 4)
             {
                 _poiShadowCategoryToggles[0].SetValueWithoutNotify(_poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.RimLight));
                 _poiShadowCategoryToggles[1].SetValueWithoutNotify(_poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.RimShade));
                 _poiShadowCategoryToggles[2].SetValueWithoutNotify(_poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.Backlight));
+                _poiShadowCategoryToggles[3].SetValueWithoutNotify(_poiShadowSyncEnabledCategories.Contains(PoiyomiShadowParamGroup.Outline));
             }
 
             UpdatePoiyomiMasterToggle();

@@ -34,7 +34,7 @@ export default defineConfig({
               { text: 'マテリアル', link: '/features/material' },
               { text: 'ブレンドシェイプ', link: '/features/blendshape' },
               { text: 'スケール', link: '/features/scale' },
-              { text: '影同期', link: '/features/shadowsync' },
+              { text: 'マテリアルコピー', link: '/features/shadowsync' },
               { text: 'メニュー生成', link: '/features/menu' },
             ]
           },

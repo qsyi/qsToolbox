@@ -69,6 +69,8 @@ namespace qsyi
             public bool             isColor;
             public Color            color;
             public string           valueText;
+            public bool             isTexture;
+            public Texture          texture;
             public ShadowParamGroup group;
             public bool             included;
         }
@@ -84,7 +86,7 @@ namespace qsyi
             private static readonly ShadowParamGroup[] GroupOrder =
             {
                 ShadowParamGroup.ShadowSettings, ShadowParamGroup.RimShade, ShadowParamGroup.Rim,
-                ShadowParamGroup.Backlight, ShadowParamGroup.DistanceFade,
+                ShadowParamGroup.Backlight, ShadowParamGroup.DistanceFade, ShadowParamGroup.Outline,
             };
 
             public static void Open(string defaultName, List<ShadowPresetSaveEntryData> items, Action<string, string, HashSet<string>> onSave)
@@ -223,6 +225,20 @@ namespace qsyi
                             int pct = Mathf.RoundToInt(Mathf.Clamp01(item.color.a) * 100f);
                             text = none ? $"{item.label}（なし）" : pct < 100 ? $"{item.label}（{pct}%）" : item.label;
                         }
+                        else if (item.isTexture)
+                        {
+                            var thumb = new Image { image = item.texture, scaleMode = ScaleMode.StretchToFill };
+                            thumb.style.width       = 28;
+                            thumb.style.height      = 16;
+                            thumb.style.marginRight = 6;
+                            thumb.style.flexShrink  = 0;
+                            thumb.style.borderTopWidth = thumb.style.borderBottomWidth =
+                                thumb.style.borderLeftWidth = thumb.style.borderRightWidth = 1;
+                            thumb.style.borderTopColor = thumb.style.borderBottomColor =
+                                thumb.style.borderLeftColor = thumb.style.borderRightColor = PaneBorderColor;
+                            row.Add(thumb);
+                            text = item.texture != null ? $"{item.label} = {item.texture.name}" : item.label;
+                        }
                         else
                         {
                             text = $"{item.label} = {item.valueText}";
@@ -341,7 +357,7 @@ namespace qsyi
         }
 
         private enum ShadowParamType  { Color, Float, Int, Vector }
-        private enum ShadowParamGroup { ShadowSettings, RimShade, Rim, Backlight, DistanceFade }
+        private enum ShadowParamGroup { ShadowSettings, RimShade, Rim, Backlight, DistanceFade, Outline }
 
         private struct ShadowParam
         {
@@ -1418,6 +1434,7 @@ namespace qsyi
                 case ShadowParamGroup.Rim:              return "リムライト";
                 case ShadowParamGroup.Backlight:        return "逆光ライト";
                 case ShadowParamGroup.DistanceFade:     return "距離フェード";
+                case ShadowParamGroup.Outline:          return "アウトライン";
                 default:                                return "その他";
             }
         }
